@@ -257,13 +257,28 @@ class ProfessionalWebSocketManager:
                 if not market_data.get('symbol') and data.get('symbol'):
                     market_data['symbol'] = data['symbol']
                     market_data['exchange'] = data.get('exchange', 'NFO')
-                    market_data['mode'] = data.get('mode', 3)
+                
+                # Force mode to 'depth' for option data (mode 3)
+                if data.get('mode') == 3 or market_data.get('mode') == 3:
+                    market_data['mode'] = 'depth'
+                elif data.get('mode') == 2 or market_data.get('mode') == 2:
+                    market_data['mode'] = 'quote'
+                else:
+                    market_data['mode'] = 'ltp'
                 
                 logger.info(f"[WS_DATA] Processing market data for {market_data.get('symbol')}: LTP={market_data.get('ltp')}, bids={len(market_data.get('bids', []))}, asks={len(market_data.get('asks', []))}")
                 self.data_processor.on_data_received(market_data)
             elif data.get("ltp") is not None or data.get("symbol"):
                 # Direct data format
-                logger.info(f"[WS_DATA] Processing price update for {data.get('symbol')}: LTP={data.get('ltp')}")
+                # Ensure mode is set based on data structure
+                if 'bids' in data or 'asks' in data or 'depth' in data:
+                    data['mode'] = 'depth'
+                elif 'open' in data or 'high' in data or 'low' in data:
+                    data['mode'] = 'quote'
+                else:
+                    data['mode'] = 'ltp'
+                
+                logger.info(f"[WS_DATA] Processing price update for {data.get('symbol')}: mode={data['mode']}, LTP={data.get('ltp')}")
                 self.data_processor.on_data_received(data)
             else:
                 logger.debug(f"[WS_UNKNOWN] Unhandled message type: {data}")

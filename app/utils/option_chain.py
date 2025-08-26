@@ -228,8 +228,9 @@ class OptionChainManager:
             return
         
         # IMPORTANT: Register handlers BEFORE subscribing
-        logger.info(f"Registering depth handler for {self.underlying} option chain")
+        logger.info(f"[REGISTER] Registering depth handler for {self.underlying} option chain")
         self.websocket_manager.register_handler('depth', self.handle_depth_update)
+        logger.info(f"[REGISTER] Handler registered successfully")
         
         # Ensure WebSocket is authenticated before subscribing
         if not self.websocket_manager.authenticated:
@@ -303,10 +304,20 @@ class OptionChainManager:
         Process incoming depth data for options
         Extract top-level bid/ask for order management
         """
-        symbol = data.get('symbol')
+        # Enhanced debugging
+        logger.info(f"[DEPTH_UPDATE] Called with data type: {type(data)}")
+        logger.info(f"[DEPTH_UPDATE] Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        
+        # Try multiple symbol fields
+        symbol = data.get('symbol') or data.get('Symbol') or data.get('trading_symbol') or data.get('tradingSymbol') or ''
+        
+        logger.info(f"[DEPTH_UPDATE] Extracted symbol: '{symbol}'")
+        logger.info(f"[DEPTH_UPDATE] Subscription map has {len(self.subscription_map)} symbols")
+        if len(self.subscription_map) > 0:
+            logger.info(f"[DEPTH_UPDATE] Sample symbols in map: {list(self.subscription_map.keys())[:3]}")
         
         # Log raw data structure for debugging
-        logger.info(f"[OPTION_CHAIN_RAW] Data keys: {list(data.keys())}, LTP={data.get('ltp')}, bids count={len(data.get('bids', []))}, asks count={len(data.get('asks', []))}")
+        logger.info(f"[OPTION_CHAIN_RAW] LTP={data.get('ltp')}, bids count={len(data.get('bids', []))}, asks count={len(data.get('asks', []))}")
         
         if symbol in self.subscription_map:
             strike_info = self.subscription_map[symbol]
@@ -316,8 +327,16 @@ class OptionChainManager:
             logger.info(f"[OPTION_CHAIN] Updating {self.underlying} {strike} {option_type} with depth data")
             
             # Update with depth data - handle various formats
-            bids = data.get('bids', data.get('depth', {}).get('buy', []))
-            asks = data.get('asks', data.get('depth', {}).get('sell', []))
+            # Check for nested depth structure first
+            depth_data_raw = data.get('depth', {})
+            if depth_data_raw:
+                bids = depth_data_raw.get('buy', depth_data_raw.get('bids', []))
+                asks = depth_data_raw.get('sell', depth_data_raw.get('asks', []))
+            else:
+                bids = data.get('bids', [])
+                asks = data.get('asks', [])
+            
+            logger.info(f"[DEPTH_EXTRACT] depth field: {depth_data_raw}, bids: {bids[:1] if bids else 'empty'}, asks: {asks[:1] if asks else 'empty'}")
             
             # Extract LTP - try multiple possible fields
             ltp = data.get('ltp') or data.get('last_price') or data.get('lastPrice') or 0
@@ -344,6 +363,15 @@ class OptionChainManager:
                     best_ask = asks[0][0]  # Price at index 0
                     ask_qty = asks[0][1]   # Quantity at index 1
             
+            # If no bid/ask data but we have LTP, use LTP as approximation
+            if not best_bid and not best_ask and ltp:
+                # Use a small spread around LTP as fallback
+                best_bid = float(ltp) * 0.995  # 0.5% below LTP
+                best_ask = float(ltp) * 1.005  # 0.5% above LTP
+                bid_qty = 100  # Default quantity
+                ask_qty = 100
+                logger.info(f"[FALLBACK] No bid/ask, using LTP-based approximation: bid={best_bid:.2f}, ask={best_ask:.2f}")
+            
             depth_data = {
                 'ltp': float(ltp) if ltp else 0,
                 'bid': float(best_bid) if best_bid else 0,
@@ -351,8 +379,8 @@ class OptionChainManager:
                 'bid_qty': int(bid_qty) if bid_qty else 0,
                 'ask_qty': int(ask_qty) if ask_qty else 0,
                 'spread': 0,
-                'volume': data.get('volume', data.get('Volume', 0)),
-                'oi': data.get('oi', data.get('openInterest', data.get('OI', 0)))
+                'volume': int(data.get('volume', data.get('Volume', 0)) or 0),
+                'oi': int(data.get('oi', data.get('openInterest', data.get('OI', data.get('open_interest', 0)))) or 0)
             }
             
             # Calculate spread

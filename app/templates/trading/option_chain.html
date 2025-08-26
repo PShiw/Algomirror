@@ -290,11 +290,27 @@ function updateStatus(status, badgeClass) {
 }
 
 function updateOptionChain(data) {
+    console.log('[DEBUG] updateOptionChain called with', data.options.length, 'options');
+    
+    // Log first few strikes for debugging
+    if (data.options && data.options.length > 0) {
+        console.log('[DEBUG] Sample incoming strikes:', 
+            data.options.slice(0, 5).map(o => o.strike));
+        
+        // Check what strikes exist in the table
+        const tableStrikes = Array.from(document.querySelectorAll('tr[data-strike]'))
+            .map(row => row.dataset.strike);
+        console.log('[DEBUG] Table strikes (first 5):', tableStrikes.slice(0, 5));
+    }
+    
     // Update market info
     updateMarketInfo(data);
     
     // Update option chain table
-    data.options.forEach(option => {
+    data.options.forEach((option, index) => {
+        if (index < 3) {  // Log first 3 for debugging
+            console.log(`[DEBUG] Processing option ${index}:`, option);
+        }
         updateOptionRow(option);
     });
 }
@@ -314,54 +330,75 @@ function updateMarketInfo(data) {
 }
 
 function updateOptionRow(option) {
-    const row = document.querySelector(`tr[data-strike="${option.strike}"]`);
-    if (!row) return;
+    // Convert strike to string to match HTML attribute
+    const strikeStr = String(option.strike);
+    console.log(`[DEBUG] Updating row for strike ${strikeStr} (type: ${typeof option.strike})`);
     
-    // Update CE LTP with animation
-    const ceLtpElement = row.querySelector('.ce-ltp');
-    if (ceLtpElement) {
-        const oldValue = parseFloat(ceLtpElement.textContent);
-        const newValue = option.ce_data.ltp;
-        
-        if (oldValue !== newValue) {
-            ceLtpElement.textContent = newValue.toFixed(2);
-            ceLtpElement.classList.add(newValue > oldValue ? 'price-up' : 'price-down');
-            setTimeout(() => {
-                ceLtpElement.classList.remove('price-up', 'price-down');
-            }, 1000);
-        }
+    // Try both the original value and string version
+    let row = document.querySelector(`tr[data-strike="${option.strike}"]`);
+    if (!row) {
+        row = document.querySelector(`tr[data-strike="${strikeStr}"]`);
     }
     
-    // Update PE LTP with animation
-    const peLtpElement = row.querySelector('.pe-ltp');
-    if (peLtpElement) {
-        const oldValue = parseFloat(peLtpElement.textContent);
-        const newValue = option.pe_data.ltp;
-        
-        if (oldValue !== newValue) {
-            peLtpElement.textContent = newValue.toFixed(2);
-            peLtpElement.classList.add(newValue > oldValue ? 'price-up' : 'price-down');
-            setTimeout(() => {
-                peLtpElement.classList.remove('price-up', 'price-down');
-            }, 1000);
-        }
+    if (!row) {
+        console.log(`[ERROR] Row not found for strike ${strikeStr}`);
+        // Log all available strikes for debugging
+        const allRows = document.querySelectorAll('tr[data-strike]');
+        const strikes = Array.from(allRows).map(r => r.dataset.strike);
+        console.log('[DEBUG] Available strikes in table:', strikes.slice(0, 10));
+        console.log('[DEBUG] Strike type in data:', typeof option.strike, 'value:', option.strike);
+        return;
     }
     
-    // Update other fields (bid, ask, spread, etc.)
-    updateCellValue(row, 3, option.ce_data.bid.toFixed(2));
-    updateCellValue(row, 5, option.ce_data.ask.toFixed(2));
-    updateCellValue(row, 7, option.ce_data.spread.toFixed(2));
+    console.log(`[DEBUG] Found row for strike ${option.strike}, updating cells...`);
     
-    updateCellValue(row, 14, option.pe_data.bid.toFixed(2));
-    updateCellValue(row, 12, option.pe_data.ask.toFixed(2));
-    updateCellValue(row, 10, option.pe_data.spread.toFixed(2));
-}
-
-function updateCellValue(row, cellIndex, value) {
-    const cell = row.cells[cellIndex];
-    if (cell && cell.textContent !== value) {
-        cell.textContent = value;
+    // Get all cells in the row
+    const cells = row.querySelectorAll('td');
+    console.log(`[DEBUG] Found ${cells.length} cells in row`);
+    
+    // Update CE data (cells 0-6)
+    cells[0].textContent = (option.ce_data.volume || 0).toLocaleString();  // Volume
+    cells[1].textContent = (option.ce_data.bid_qty || 0).toLocaleString(); // Bid Qty
+    cells[2].textContent = (option.ce_data.bid || 0).toFixed(2);          // Bid
+    
+    // CE LTP with animation (cell 3)
+    const oldCeLtp = parseFloat(cells[3].textContent) || 0;
+    const newCeLtp = option.ce_data.ltp || 0;
+    if (oldCeLtp !== newCeLtp) {
+        cells[3].textContent = newCeLtp.toFixed(2);
+        cells[3].classList.add(newCeLtp > oldCeLtp ? 'price-up' : 'price-down');
+        setTimeout(() => {
+            cells[3].classList.remove('price-up', 'price-down');
+        }, 1000);
     }
+    
+    cells[4].textContent = (option.ce_data.ask || 0).toFixed(2);          // Ask
+    cells[5].textContent = (option.ce_data.ask_qty || 0).toLocaleString(); // Ask Qty
+    cells[6].textContent = (option.ce_data.spread || 0).toFixed(2);       // Spread
+    
+    // Skip cells 7, 8, 9 (CE Tag, Strike, PE Tag) - they don't change
+    
+    // Update PE data (cells 10-16)
+    cells[10].textContent = (option.pe_data.spread || 0).toFixed(2);       // Spread
+    cells[11].textContent = (option.pe_data.ask_qty || 0).toLocaleString(); // Ask Qty
+    cells[12].textContent = (option.pe_data.ask || 0).toFixed(2);          // Ask
+    
+    // PE LTP with animation (cell 13)
+    const oldPeLtp = parseFloat(cells[13].textContent) || 0;
+    const newPeLtp = option.pe_data.ltp || 0;
+    if (oldPeLtp !== newPeLtp) {
+        cells[13].textContent = newPeLtp.toFixed(2);
+        cells[13].classList.add(newPeLtp > oldPeLtp ? 'price-up' : 'price-down');
+        setTimeout(() => {
+            cells[13].classList.remove('price-up', 'price-down');
+        }, 1000);
+    }
+    
+    cells[14].textContent = (option.pe_data.bid || 0).toFixed(2);          // Bid
+    cells[15].textContent = (option.pe_data.bid_qty || 0).toLocaleString(); // Bid Qty
+    cells[16].textContent = (option.pe_data.volume || 0).toLocaleString();  // Volume
+    
+    console.log(`[DEBUG] Updated strike ${option.strike}: CE LTP=${newCeLtp}, PE LTP=${newPeLtp}`);
 }
 
 function updateStatus(text, className) {

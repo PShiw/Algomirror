@@ -445,14 +445,15 @@ def api_option_chain(underlying):
 @login_required
 def option_chain_stream(underlying):
     """Get real-time option chain updates via server-sent events"""
+    from app.utils.background_service import option_chain_service
+    import json
+    import time
+    
+    # Log outside the generator where we have app context
+    print(f"[SSE] Starting stream for {underlying}")
+    print(f"[SSE] Active managers: {list(option_chain_service.active_managers.keys())}")
+    
     def generate():
-        from app.utils.background_service import option_chain_service
-        import json
-        import time
-        
-        current_app.logger.info(f"[SSE] Starting stream for {underlying}")
-        current_app.logger.info(f"[SSE] Active managers: {list(option_chain_service.active_managers.keys())}")
-        
         while True:
             try:
                 # Check if option chain is active
@@ -460,24 +461,26 @@ def option_chain_stream(underlying):
                     manager = option_chain_service.active_managers[underlying]
                     chain_data = manager.get_option_chain()
                     
-                    # Log data being sent
-                    current_app.logger.debug(f"[SSE] Sending data for {underlying}, options count: {len(chain_data.get('options', []))}")
+                    # Simple print for debugging
+                    print(f"[SSE] Sending data for {underlying}, options count: {len(chain_data.get('options', []))}")
                     
                     # Send as server-sent event
                     data_json = json.dumps(chain_data)
                     yield f"data: {data_json}\n\n"
                 else:
-                    current_app.logger.warning(f"[SSE] Option chain not active for {underlying}")
+                    print(f"[SSE] Option chain not active for {underlying}")
                     yield f"data: {json.dumps({'status': 'inactive', 'message': f'Option chain not active for {underlying}'})}\n\n"
                 
                 # Update every second
                 time.sleep(1)
                 
             except GeneratorExit:
-                current_app.logger.info(f"[SSE] Client disconnected from {underlying} stream")
+                print(f"[SSE] Client disconnected from {underlying} stream")
                 break
             except Exception as e:
-                current_app.logger.error(f"[SSE] Error streaming option chain: {e}")
+                print(f"[SSE] Error streaming option chain: {e}")
+                import traceback
+                traceback.print_exc()
                 yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
                 break
     
