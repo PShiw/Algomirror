@@ -465,27 +465,61 @@ def option_chain_stream(underlying):
     import json
     import time
     
+    # Get expiry from query params
+    expiry = request.args.get('expiry')
+    
     # Log outside the generator where we have app context
-    print(f"[SSE] Starting stream for {underlying}")
+    print(f"[SSE] Starting stream for {underlying} with expiry {expiry}")
     print(f"[SSE] Active managers: {list(option_chain_service.active_managers.keys())}")
     
     def generate():
+        # Determine the manager key to use
+        manager_key = f"{underlying}_{expiry}" if expiry else None
+        
         while True:
             try:
-                # Check if option chain is active
-                if underlying in option_chain_service.active_managers:
-                    manager = option_chain_service.active_managers[underlying]
+                # Try to find the appropriate manager
+                manager = None
+                
+                if manager_key and manager_key in option_chain_service.active_managers:
+                    # Exact match with expiry
+                    manager = option_chain_service.active_managers[manager_key]
+                else:
+                    # Find any manager for this underlying
+                    for key in option_chain_service.active_managers.keys():
+                        if key.startswith(f"{underlying}_"):
+                            # If no expiry specified, use the first available
+                            if not expiry:
+                                manager = option_chain_service.active_managers[key]
+                                print(f"[SSE] Using manager {key} for {underlying}")
+                                break
+                            # If expiry specified but not found, try to start it
+                            elif key.endswith(f"_{expiry}"):
+                                manager = option_chain_service.active_managers[key]
+                                break
+                
+                # If no manager found, try to start one
+                if not manager and expiry:
+                    print(f"[SSE] No manager found for {underlying}_{expiry}, attempting to start")
+                    # Use the primary account from background service instead of current_user
+                    if option_chain_service.primary_account:
+                        if option_chain_service.start_option_chain(underlying, expiry):
+                            manager_key = f"{underlying}_{expiry}"
+                            manager = option_chain_service.active_managers.get(manager_key)
+                            print(f"[SSE] Started new manager for {manager_key}")
+                
+                if manager:
                     chain_data = manager.get_option_chain()
                     
                     # Simple print for debugging
-                    print(f"[SSE] Sending data for {underlying}, options count: {len(chain_data.get('options', []))}")
+                    print(f"[SSE] Sending data for {underlying}, options count: {len(chain_data.get('options', []))}, expiry: {chain_data.get('expiry')}")
                     
                     # Send as server-sent event
                     data_json = json.dumps(chain_data)
                     yield f"data: {data_json}\n\n"
                 else:
-                    print(f"[SSE] Option chain not active for {underlying}")
-                    yield f"data: {json.dumps({'status': 'inactive', 'message': f'Option chain not active for {underlying}'})}\n\n"
+                    print(f"[SSE] Option chain not active for {underlying} with expiry {expiry}")
+                    yield f"data: {json.dumps({'status': 'inactive', 'message': f'Option chain not active for {underlying} {expiry or ""}'})}\n\n"
                 
                 # Update every second
                 time.sleep(1)

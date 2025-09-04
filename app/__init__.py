@@ -29,7 +29,21 @@ def setup_logging(app):
         os.mkdir('logs')
     
     # JSON formatter for structured logging
-    logHandler = RotatingFileHandler('logs/algomirror.log', maxBytes=10485760, backupCount=10)
+    # Use simple FileHandler on Windows to avoid rotation issues
+    import platform
+    is_windows = platform.system() == 'Windows'
+    
+    if is_windows:
+        # On Windows, use simple FileHandler to avoid rotation conflicts
+        from logging import FileHandler
+        logHandler = FileHandler('logs/algomirror.log', mode='a')
+    else:
+        # On Unix systems, use RotatingFileHandler
+        logHandler = RotatingFileHandler(
+            'logs/algomirror.log', 
+            maxBytes=10485760, 
+            backupCount=10
+        )
     formatter = jsonlogger.JsonFormatter(
         fmt='%(asctime)s %(levelname)s %(name)s %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'

@@ -36,52 +36,46 @@ class OptionChainCache:
 
 class OptionChainManager:
     """
-    Singleton class managing option chain with market depth
+    Manager class for option chain with market depth
     Handles both LTP and bid/ask data for order management
+    Note: Not a singleton anymore to support multiple underlying/expiry combinations
     """
     
-    _instance = None
-    _lock = threading.Lock()
-    
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def __init__(self, underlying, expiry, websocket_manager=None):
-        if not hasattr(self, 'initialized'):
-            self.underlying = underlying
-            self.expiry = expiry
-            self.strike_step = 50 if underlying == 'NIFTY' else 100
-            self.option_data = {}
-            self.subscription_map = {}
-            self.underlying_ltp = 0
-            self.underlying_bid = 0
-            self.underlying_ask = 0
-            self.atm_strike = 0
-            self.websocket_manager = websocket_manager
-            self.cache = OptionChainCache()
-            self.monitoring_active = False
-            self.initialized = True
+        self.underlying = underlying
+        self.expiry = expiry
+        self.strike_step = 50 if underlying == 'NIFTY' else 100
+        self.option_data = {}
+        self.subscription_map = {}
+        self.underlying_ltp = 0
+        self.underlying_bid = 0
+        self.underlying_ask = 0
+        self.atm_strike = 0
+        self.websocket_manager = websocket_manager
+        self.cache = OptionChainCache()
+        self.monitoring_active = False
+        self.initialized = False
+        self.manager_id = f"{underlying}_{expiry}"
     
     def initialize(self, api_client):
         """Setup option chain with depth subscriptions"""
+        if self.initialized:
+            logger.info(f"Option chain already initialized for {self.underlying}")
+            return True
+            
         self.api_client = api_client
         self.calculate_atm()
         self.generate_strikes()
         self.setup_depth_subscriptions()
+        self.initialized = True
         return True
     
     def calculate_atm(self):
         """Determine ATM strike from underlying LTP"""
         try:
             # Fetch underlying quote
-            if self.underlying == 'NIFTY':
-                response = self.api_client.quotes(symbol='NIFTY', exchange='NSE_INDEX')
-            else:  # BANKNIFTY
-                response = self.api_client.quotes(symbol='BANKNIFTY', exchange='NSE_INDEX')
+            exchange = 'BSE_INDEX' if self.underlying == 'SENSEX' else 'NSE_INDEX'
+            response = self.api_client.quotes(symbol=self.underlying, exchange=exchange)
             
             if response.get('status') == 'success':
                 data = response.get('data', {})
@@ -228,10 +222,10 @@ class OptionChainManager:
             return
         
         # IMPORTANT: Register handlers BEFORE subscribing
-        logger.info(f"[REGISTER] Registering handlers for {self.underlying} option chain")
+        logger.debug(f"[REGISTER] Registering handlers for {self.underlying} option chain")
         self.websocket_manager.register_handler('depth', self.handle_depth_update)
         self.websocket_manager.register_handler('quote', self.handle_quote_update)
-        logger.info(f"[REGISTER] Handlers registered successfully")
+        logger.debug(f"[REGISTER] Handlers registered successfully")
         
         # Ensure WebSocket is authenticated before subscribing
         if not self.websocket_manager.authenticated:
@@ -330,7 +324,7 @@ class OptionChainManager:
                     # Optionally regenerate tags if ATM changes
                     self.update_option_tags()
                 
-                logger.info(f"[QUOTE_UPDATE] {self.underlying} spot updated to {self.underlying_ltp}")
+                logger.debug(f"[QUOTE_UPDATE] {self.underlying} spot updated to {self.underlying_ltp}")
                 
                 # Also extract bid/ask if available
                 self.underlying_bid = float(data.get('bid', 0) or 0)
@@ -342,26 +336,26 @@ class OptionChainManager:
         Extract top-level bid/ask for order management
         """
         # Enhanced debugging
-        logger.info(f"[DEPTH_UPDATE] Called with data type: {type(data)}")
-        logger.info(f"[DEPTH_UPDATE] Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        logger.debug(f"[DEPTH_UPDATE] Called with data type: {type(data)}")
+        logger.debug(f"[DEPTH_UPDATE] Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
         
         # Try multiple symbol fields
         symbol = data.get('symbol') or data.get('Symbol') or data.get('trading_symbol') or data.get('tradingSymbol') or ''
         
-        logger.info(f"[DEPTH_UPDATE] Extracted symbol: '{symbol}'")
-        logger.info(f"[DEPTH_UPDATE] Subscription map has {len(self.subscription_map)} symbols")
+        logger.debug(f"[DEPTH_UPDATE] Extracted symbol: '{symbol}'")
+        logger.debug(f"[DEPTH_UPDATE] Subscription map has {len(self.subscription_map)} symbols")
         if len(self.subscription_map) > 0:
-            logger.info(f"[DEPTH_UPDATE] Sample symbols in map: {list(self.subscription_map.keys())[:3]}")
+            logger.debug(f"[DEPTH_UPDATE] Sample symbols in map: {list(self.subscription_map.keys())[:3]}")
         
         # Log raw data structure for debugging
-        logger.info(f"[OPTION_CHAIN_RAW] LTP={data.get('ltp')}, bids count={len(data.get('bids', []))}, asks count={len(data.get('asks', []))}")
+        logger.debug(f"[OPTION_CHAIN_RAW] LTP={data.get('ltp')}, bids count={len(data.get('bids', []))}, asks count={len(data.get('asks', []))}")
         
         if symbol in self.subscription_map:
             strike_info = self.subscription_map[symbol]
             option_type = strike_info['type']  # 'CE' or 'PE'
             strike = strike_info['strike']
             
-            logger.info(f"[OPTION_CHAIN] Updating {self.underlying} {strike} {option_type} with depth data")
+            logger.debug(f"[OPTION_CHAIN] Updating {self.underlying} {strike} {option_type} with depth data")
             
             # Update with depth data - handle various formats
             # Check for nested depth structure first
@@ -373,7 +367,7 @@ class OptionChainManager:
                 bids = data.get('bids', [])
                 asks = data.get('asks', [])
             
-            logger.info(f"[DEPTH_EXTRACT] depth field: {depth_data_raw}, bids: {bids[:1] if bids else 'empty'}, asks: {asks[:1] if asks else 'empty'}")
+            logger.debug(f"[DEPTH_EXTRACT] depth field: {depth_data_raw}, bids: {bids[:1] if bids else 'empty'}, asks: {asks[:1] if asks else 'empty'}")
             
             # Extract LTP - try multiple possible fields
             ltp = data.get('ltp') or data.get('last_price') or data.get('lastPrice') or 0

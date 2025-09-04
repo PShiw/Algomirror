@@ -207,6 +207,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle expiry change
     document.getElementById('expirySelect').addEventListener('change', function() {
         refreshOptionChain();
+        startRealTimeUpdates(); // Restart SSE with new expiry
     });
 });
 
@@ -223,7 +224,12 @@ function startRealTimeUpdates() {
     updateStatus('Connecting...', 'badge-warning');
     
     // Create SSE connection - using the /stream/<underlying> endpoint with credentials
-    eventSource = new EventSource(`/trading/api/option-chain/stream/${underlying}`, {
+    // Include expiry as query parameter if available
+    const sseUrl = expiry ? 
+        `/trading/api/option-chain/stream/${underlying}?expiry=${encodeURIComponent(expiry)}` : 
+        `/trading/api/option-chain/stream/${underlying}`;
+    
+    eventSource = new EventSource(sseUrl, {
         withCredentials: true
     });
     

@@ -94,10 +94,11 @@ class OptionChainBackgroundService:
                 import threading
                 def start_chains():
                     time_module.sleep(2)  # Give Flask time to start
-                    self.start_option_chain('NIFTY')
-                    self.start_option_chain('BANKNIFTY')
-                    self.start_option_chain('SENSEX')
-                    logger.info("Option chains started automatically for NIFTY, BANKNIFTY, and SENSEX")
+                    # Start first 4 expiries for each index
+                    self.start_option_chain('NIFTY')  # Will load 4 expiries
+                    self.start_option_chain('BANKNIFTY')  # Will load 4 expiries
+                    self.start_option_chain('SENSEX')  # Will load 4 expiries
+                    logger.info("Option chains started automatically for NIFTY, BANKNIFTY, and SENSEX with 4 expiries each")
                 
                 thread = threading.Thread(target=start_chains)
                 thread.daemon = True
@@ -140,10 +141,14 @@ class OptionChainBackgroundService:
                 # Update primary account
                 self.primary_account = next_account
                 
-                # Restart option chains with new account
-                for underlying in ['NIFTY', 'BANKNIFTY', 'SENSEX']:
-                    if underlying in self.active_managers:
-                        self.restart_option_chain(underlying)
+                # Restart all active option chains with new account
+                active_underlyings = set()
+                for key in self.active_managers.keys():
+                    underlying = key.split('_')[0]
+                    active_underlyings.add(underlying)
+                
+                for underlying in active_underlyings:
+                    self.restart_option_chain(underlying)
                 
                 logger.info(f"Failover successful to: {next_account.account_name}")
             else:
@@ -154,15 +159,11 @@ class OptionChainBackgroundService:
             logger.error(f"Failover failed for {next_account.account_name}: {e}")
             self.attempt_failover()
     
-    def start_option_chain(self, underlying: str):
-        """Start option chain monitoring for specified underlying"""
+    def start_option_chain(self, underlying: str, expiry: str = None):
+        """Start option chain monitoring for specified underlying and expiry"""
         if not self.primary_account:
             logger.error("No primary account available")
             return False
-        
-        if underlying in self.active_managers:
-            logger.info(f"Option chain already running for {underlying}")
-            return True
         
         try:
             # Create API client
@@ -171,104 +172,129 @@ class OptionChainBackgroundService:
                 host=self.primary_account.host_url
             )
             
-            # Get latest expiry
-            expiry_response = client.expiry(
-                symbol=underlying,
-                exchange='NFO',
-                instrumenttype='options'
-            )
-            
-            if expiry_response.get('status') != 'success':
-                logger.error(f"Failed to get expiry for {underlying}")
-                return False
-            
-            expiries = expiry_response.get('data', [])
-            if not expiries:
-                logger.error(f"No expiries available for {underlying}")
-                return False
-            
-            expiry = expiries[0]  # Use nearest expiry
-            
-            # Create WebSocket manager
-            ws_manager = ProfessionalWebSocketManager()
-            ws_manager.create_connection_pool(
-                primary_account=self.primary_account,
-                backup_accounts=self.backup_accounts
-            )
-            
-            # Connect WebSocket
-            if hasattr(self.primary_account, 'websocket_url'):
-                ws_manager.connect(
-                    ws_url=self.primary_account.websocket_url,
-                    api_key=self.primary_account.get_api_key()
+            # Get expiry dates if not provided
+            if not expiry:
+                expiry_response = client.expiry(
+                    symbol=underlying,
+                    exchange='BFO' if underlying == 'SENSEX' else 'NFO',
+                    instrumenttype='options'
                 )
                 
-                # Wait for authentication to complete (max 5 seconds)
-                auth_wait_time = 0
-                while not ws_manager.authenticated and auth_wait_time < 5:
-                    time_module.sleep(0.5)
-                    auth_wait_time += 0.5
-                    
-                if not ws_manager.authenticated:
-                    logger.error(f"WebSocket authentication timeout for {underlying}")
+                if expiry_response.get('status') != 'success':
+                    logger.error(f"Failed to get expiry for {underlying}")
                     return False
                 
-                logger.info(f"WebSocket authenticated, proceeding with option chain setup")
+                expiries = expiry_response.get('data', [])
+                if not expiries:
+                    logger.error(f"No expiries available for {underlying}")
+                    return False
+                
+                # Get first 4 expiries for streaming
+                expiries_to_use = expiries[:4] if len(expiries) >= 4 else expiries
+            else:
+                expiries_to_use = [expiry]
             
-            # Create option chain manager
-            option_manager = OptionChainManager(
-                underlying=underlying,
-                expiry=expiry,
-                websocket_manager=ws_manager
-            )
+            all_managers_started = True
             
-            # Initialize with API client
-            option_manager.initialize(client)
+            # Start manager for each expiry
+            for exp in expiries_to_use:
+                manager_key = f"{underlying}_{exp}"
+                
+                if manager_key in self.active_managers:
+                    logger.info(f"Option chain already running for {manager_key}")
+                    continue
             
-            # Start monitoring
-            option_manager.start_monitoring()
+                # Create or get WebSocket manager for this underlying
+                ws_manager_key = underlying
+                if ws_manager_key not in self.websocket_managers:
+                    ws_manager = ProfessionalWebSocketManager()
+                    ws_manager.create_connection_pool(
+                        primary_account=self.primary_account,
+                        backup_accounts=self.backup_accounts
+                    )
+                    
+                    # Connect WebSocket
+                    if hasattr(self.primary_account, 'websocket_url'):
+                        ws_manager.connect(
+                            ws_url=self.primary_account.websocket_url,
+                            api_key=self.primary_account.get_api_key()
+                        )
+                        
+                        # Wait for authentication to complete (max 5 seconds)
+                        auth_wait_time = 0
+                        while not ws_manager.authenticated and auth_wait_time < 5:
+                            time_module.sleep(0.5)
+                            auth_wait_time += 0.5
+                            
+                        if not ws_manager.authenticated:
+                            logger.error(f"WebSocket authentication timeout for {underlying}")
+                            all_managers_started = False
+                            continue
+                        
+                        logger.info(f"WebSocket authenticated for {underlying}")
+                    
+                    self.websocket_managers[ws_manager_key] = ws_manager
+                else:
+                    ws_manager = self.websocket_managers[ws_manager_key]
+                
+                # Create option chain manager for this expiry
+                option_manager = OptionChainManager(
+                    underlying=underlying,
+                    expiry=exp,
+                    websocket_manager=ws_manager
+                )
+                
+                # Initialize with API client
+                option_manager.initialize(client)
+                
+                # Start monitoring
+                option_manager.start_monitoring()
+                
+                # Store managers with unique key
+                self.active_managers[manager_key] = option_manager
+                
+                logger.info(f"Option chain started for {manager_key}")
             
-            # Store managers
-            self.active_managers[underlying] = option_manager
-            self.websocket_managers[underlying] = ws_manager
-            
-            logger.info(f"Option chain started for {underlying} with expiry {expiry}")
-            return True
+            return all_managers_started
             
         except Exception as e:
             logger.error(f"Error starting option chain for {underlying}: {e}")
             return False
     
-    def stop_option_chain(self, underlying: str):
-        """Stop option chain monitoring for specified underlying"""
-        if underlying not in self.active_managers:
-            return
-        
+    def stop_option_chain(self, underlying: str, expiry: str = None):
+        """Stop option chain monitoring for specified underlying and optionally expiry"""
         try:
-            # Stop option chain manager
-            manager = self.active_managers.get(underlying)
-            if manager:
-                manager.stop_monitoring()
-            
-            # Disconnect WebSocket
-            ws_manager = self.websocket_managers.get(underlying)
-            if ws_manager:
-                ws_manager.disconnect()
-            
-            # Remove from active managers
-            del self.active_managers[underlying]
-            del self.websocket_managers[underlying]
-            
-            logger.info(f"Option chain stopped for {underlying}")
-            
+            if expiry:
+                # Stop specific expiry
+                manager_key = f"{underlying}_{expiry}"
+                if manager_key in self.active_managers:
+                    manager = self.active_managers[manager_key]
+                    manager.stop_monitoring()
+                    del self.active_managers[manager_key]
+                    logger.info(f"Option chain stopped for {manager_key}")
+            else:
+                # Stop all expiries for this underlying
+                keys_to_remove = [k for k in self.active_managers.keys() if k.startswith(f"{underlying}_")]
+                for key in keys_to_remove:
+                    manager = self.active_managers[key]
+                    manager.stop_monitoring()
+                    del self.active_managers[key]
+                    logger.info(f"Option chain stopped for {key}")
+                
+                # Disconnect WebSocket for this underlying
+                if underlying in self.websocket_managers:
+                    ws_manager = self.websocket_managers[underlying]
+                    ws_manager.disconnect()
+                    del self.websocket_managers[underlying]
+                
         except Exception as e:
             logger.error(f"Error stopping option chain for {underlying}: {e}")
     
-    def restart_option_chain(self, underlying: str):
+    def restart_option_chain(self, underlying: str, expiry: str = None):
         """Restart option chain with current primary account"""
-        logger.info(f"Restarting option chain for {underlying}")
-        self.stop_option_chain(underlying)
-        self.start_option_chain(underlying)
+        logger.info(f"Restarting option chain for {underlying} {expiry or 'all expiries'}")
+        self.stop_option_chain(underlying, expiry)
+        self.start_option_chain(underlying, expiry)
     
     def stop_all_option_chains(self):
         """Stop all active option chains"""
@@ -320,6 +346,7 @@ class OptionChainBackgroundService:
             if not self.is_holiday():
                 self.start_option_chain('NIFTY')
                 self.start_option_chain('BANKNIFTY')
+                self.start_option_chain('SENSEX')
     
     def on_market_close(self):
         """Called when market closes"""

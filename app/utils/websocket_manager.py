@@ -58,7 +58,7 @@ class WebSocketDataProcessor:
             mode = data.get('mode', 'ltp')
             symbol = data.get('symbol', 'UNKNOWN')
             
-            logger.info(f"[DATA_PROCESSOR] Routing data for {symbol}, mode={mode}, handlers: quote={len(self.quote_handlers)}, depth={len(self.depth_handlers)}, ltp={len(self.ltp_handlers)}")
+            logger.debug(f"[DATA_PROCESSOR] Routing data for {symbol}, mode={mode}, handlers: quote={len(self.quote_handlers)}, depth={len(self.depth_handlers)}, ltp={len(self.ltp_handlers)}")
             
             if mode == 'quote':
                 self.handle_quote_update(data)
@@ -219,8 +219,12 @@ class ProfessionalWebSocketManager:
             data = json.loads(message)
             
             # Log ALL incoming messages for debugging - include full data structure
-            logger.info(f"[WS_RAW] Full message: {json.dumps(data)[:500]}")
-            logger.info(f"[WS_MSG] Received: type={data.get('type')}, symbol={data.get('symbol')}, exchange={data.get('exchange')}")
+            # Reduced logging - only log non-market data or use debug level
+            msg_type = data.get('type')
+            if msg_type != 'market_data':
+                logger.info(f"[WS_MSG] Received: type={msg_type}, symbol={data.get('symbol')}, exchange={data.get('exchange')}")
+            else:
+                logger.debug(f"[WS_DATA] Market data for {data.get('symbol')}")
             
             # Handle authentication response
             if data.get("type") == "auth":
@@ -266,7 +270,7 @@ class ProfessionalWebSocketManager:
                 else:
                     market_data['mode'] = 'ltp'
                 
-                logger.info(f"[WS_DATA] Processing market data for {market_data.get('symbol')}: LTP={market_data.get('ltp')}, bids={len(market_data.get('bids', []))}, asks={len(market_data.get('asks', []))}")
+                logger.debug(f"[WS_DATA] Processing market data for {market_data.get('symbol')}: LTP={market_data.get('ltp')}")
                 self.data_processor.on_data_received(market_data)
             elif data.get("ltp") is not None or data.get("symbol"):
                 # Direct data format
@@ -278,7 +282,7 @@ class ProfessionalWebSocketManager:
                 else:
                     data['mode'] = 'ltp'
                 
-                logger.info(f"[WS_DATA] Processing price update for {data.get('symbol')}: mode={data['mode']}, LTP={data.get('ltp')}")
+                logger.debug(f"[WS_DATA] Processing price update for {data.get('symbol')}: mode={data['mode']}, LTP={data.get('ltp')}")
                 self.data_processor.on_data_received(data)
             else:
                 logger.debug(f"[WS_UNKNOWN] Unhandled message type: {data}")
