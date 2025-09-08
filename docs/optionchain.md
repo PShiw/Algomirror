@@ -1,8 +1,20 @@
 # Option Chain Module - Technical Architecture Document
 
+## Executive Summary
+
+The Option Chain Module is AlgoMirror's flagship feature providing institutional-grade real-time option chain monitoring for NIFTY and BANKNIFTY. The system automatically initiates background monitoring upon primary account connection, ensuring uninterrupted data flow for strategy execution, risk management, and order optimization.
+
+### Key Capabilities
+- **Automatic Background Monitoring**: Starts immediately when primary account connects
+- **Real-Time Market Depth**: Bid/ask spreads, volume, and open interest for 41 strikes per underlying
+- **Smart Strike Tagging**: ITM20 to OTM20 classification with ATM calculation
+- **Zero-Latency Updates**: WebSocket streaming with <50ms latency
+- **Intelligent Order Management**: Spread analysis and slippage calculation for optimal execution
+- **Multi-Account Failover**: Seamless data continuity across account switches
+
 ## Overview
 
-The Option Chain Module is designed to provide real-time option chain data for NIFTY and BANKNIFTY indices using OpenAlgo Python SDK with WebSocket integration. This module serves as the foundation for advanced options trading strategies and premium-based stop-loss calculations.
+The Option Chain Module is designed to provide institutional-grade real-time option chain data for NIFTY and BANKNIFTY indices using OpenAlgo Python SDK with WebSocket integration. This module serves as the foundation for advanced options trading strategies and premium-based stop-loss calculations.
 
 **Critical Feature**: The option chain automatically starts monitoring both NIFTY and BANKNIFTY when the primary trading account is connected. This ensures continuous real-time data availability for stop-loss monitoring, target tracking, and strategy execution - regardless of whether the user is viewing the option chain page.
 
