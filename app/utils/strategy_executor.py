@@ -172,7 +172,7 @@ class StrategyExecutor:
                 'symbol': symbol,
                 'action': leg.action,
                 'exchange': exchange,
-                'product': 'MIS',  # Default to MIS for intraday
+                'product': self.strategy.product_order_type or 'MIS',  # Use strategy's product order type
                 'quantity': quantity
             }
 
@@ -931,7 +931,7 @@ class StrategyExecutor:
                         strategy=f"Strategy_{self.strategy.id}",
                         symbol=execution.symbol,
                         exchange=execution.exchange,
-                        product='MIS'
+                        product=self.strategy.product_order_type or 'MIS'
                     )
 
                     if position_response.get('status') == 'success':
@@ -1109,7 +1109,7 @@ class StrategyExecutor:
                 action=exit_action,
                 exchange=execution.exchange,
                 price_type='MARKET',
-                product='MIS',
+                product=self.strategy.product_order_type or 'MIS',
                 quantity=execution.quantity
             )
 

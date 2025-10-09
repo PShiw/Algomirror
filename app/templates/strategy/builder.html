@@ -58,6 +58,16 @@
 
                     <div class="form-control">
                         <label class="label">
+                            <span class="label-text">Product Order Type</span>
+                        </label>
+                        <select id="productOrderType" class="select select-bordered">
+                            <option value="MIS" {% if strategy and strategy.product_order_type == 'MIS' %}selected{% elif not strategy %}selected{% endif %}>MIS (Intraday)</option>
+                            <option value="NRML" {% if strategy and strategy.product_order_type == 'NRML' %}selected{% endif %}>NRML (Overnight)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
                             <span class="label-text">Select Accounts</span>
                         </label>
                         <div class="space-y-2">
@@ -621,6 +631,7 @@ function saveStrategy(execute = false) {
         name: document.getElementById('strategyName').value,
         risk_profile: document.getElementById('riskProfile').value,
         market_condition: document.getElementById('marketCondition').value,
+        product_order_type: document.getElementById('productOrderType').value,
         selected_accounts: selectedAccounts,
         allocation_type: 'equal',
         max_loss: parseFloat(document.getElementById('maxLoss').value) || null,

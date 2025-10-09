@@ -19,7 +19,8 @@
       "Bash(del algomirror.db)",
       "Bash(dir:*)",
       "Bash(del check_accounts.py)",
-      "Read(//d/openalgo-multi/openalgo2/**)"
+      "Read(//d/openalgo-multi/openalgo2/**)",
+      "Bash(del add_product_order_type.py)"
     ],
     "deny": [],
     "ask": []

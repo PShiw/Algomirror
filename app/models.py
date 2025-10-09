@@ -271,6 +271,9 @@ class Strategy(db.Model):
     max_profit = db.Column(db.Float)
     trailing_sl = db.Column(db.Float)
 
+    # Order settings
+    product_order_type = db.Column(db.String(10), default='MIS')  # 'MIS' or 'NRML'
+
     # Multi-account settings
     selected_accounts = db.Column(db.JSON)  # List of account IDs
     allocation_type = db.Column(db.String(50))  # 'equal', 'proportional', 'custom'

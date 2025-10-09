@@ -127,6 +127,7 @@ def builder(strategy_id=None):
             strategy.description = data.get('description')
             strategy.market_condition = data.get('market_condition')
             strategy.risk_profile = data.get('risk_profile')
+            strategy.product_order_type = data.get('product_order_type', 'MIS')
             strategy.selected_accounts = data.get('selected_accounts', [])
             strategy.allocation_type = data.get('allocation_type', 'equal')
             strategy.max_loss = data.get('max_loss')
@@ -728,7 +729,7 @@ def close_all_positions(strategy_id):
                     action=close_action,
                     quantity=position.quantity,
                     price_type='MARKET',
-                    product='MIS'
+                    product=strategy.product_order_type or 'MIS'
                 )
 
                 if response.get('status') == 'success':
