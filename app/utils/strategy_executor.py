@@ -289,12 +289,22 @@ class StrategyExecutor:
                     # If no data or final attempt, use what we have
                     break
 
-                # Determine execution status based on broker order status
+                # Determine execution status based on broker order status AND price
                 # OpenAlgo valid statuses: 'complete', 'open', 'rejected', 'cancelled'
-                broker_order_status = order_status_data.get('order_status', 'open') if order_status_data else 'open'
+                broker_order_status = order_status_data.get('order_status') if order_status_data else None
+                entry_price = order_status_data.get('average_price', 0) if order_status_data else 0
 
+                # Handle None order_status - use default 'open'
+                if broker_order_status is None:
+                    broker_order_status = 'open'
+
+                # If we have an entry price > 0, order is definitely filled (override broker status)
+                if entry_price and entry_price > 0:
+                    execution_status = 'entered'
+                    broker_order_status = 'complete'
+                    logger.info(f"Order {order_id} filled at {entry_price} for {symbol} on {account_name}")
                 # Map OpenAlgo broker status to our internal execution status
-                if broker_order_status in ['rejected', 'cancelled']:
+                elif broker_order_status in ['rejected', 'cancelled']:
                     # Rejected/cancelled orders are marked as failed
                     execution_status = 'failed'
                     logger.warning(f"Order {order_id} was {broker_order_status} by broker for {symbol} on {account_name}")
