@@ -87,6 +87,32 @@ def dashboard():
                          today_pnl=today_pnl,
                          active_strategies=len(active_strategies))
 
+@strategy_bp.route('/create-new', methods=['GET'])
+@login_required
+def create_new_strategy():
+    """Create a blank strategy and redirect to its builder page"""
+    try:
+        # Create a new blank strategy
+        strategy = Strategy(
+            user_id=current_user.id,
+            name=f"New Strategy {datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            description="",
+            is_active=True
+        )
+        db.session.add(strategy)
+        db.session.commit()
+
+        logger.info(f"Created new blank strategy ID {strategy.id} for user {current_user.id}")
+
+        # Redirect to the builder page with the new strategy ID
+        return redirect(url_for('strategy.builder', strategy_id=strategy.id))
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating new strategy: {e}")
+        flash('Error creating new strategy', 'error')
+        return redirect(url_for('strategy.dashboard'))
+
 @strategy_bp.route('/builder', methods=['GET', 'POST'])
 @strategy_bp.route('/builder/<int:strategy_id>', methods=['GET', 'POST'])
 @login_required

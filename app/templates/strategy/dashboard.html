@@ -30,7 +30,7 @@
                 </svg>
             </button>
 
-            <a href="{{ url_for('strategy.builder') }}" class="btn btn-primary">
+            <a href="{{ url_for('strategy.create_new_strategy') }}" class="btn btn-primary">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
@@ -109,7 +109,7 @@
             {% if strategies|length == 0 %}
             <div class="text-center py-8">
                 <p class="text-base-content/60 mb-4">No templates created yet</p>
-                <a href="{{ url_for('strategy.builder') }}" class="link link-primary">Create your first template</a>
+                <a href="{{ url_for('strategy.create_new_strategy') }}" class="link link-primary">Create your first template</a>
             </div>
             {% else %}
             <div class="overflow-x-auto">
