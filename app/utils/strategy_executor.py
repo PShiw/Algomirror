@@ -271,9 +271,36 @@ class StrategyExecutor:
                 print(f"[ORDER PARAMS] Placing order for {account_name}: {order_params}")
                 logger.debug(f"Order params: {order_params}")
 
-                # Place order
-                response = client.placeorder(**order_params)
-                print(f"[ORDER RESPONSE] {response}")
+                # Place order with retry logic for reliability
+                max_retries = 3
+                retry_delay = 1  # Start with 1 second
+                response = None
+                last_error = None
+
+                for attempt in range(max_retries):
+                    try:
+                        response = client.placeorder(**order_params)
+                        print(f"[ORDER RESPONSE] Attempt {attempt + 1}: {response}")
+
+                        # If we got a response, break the retry loop
+                        if response and isinstance(response, dict):
+                            break
+
+                    except Exception as api_error:
+                        last_error = str(api_error)
+                        logger.warning(f"[RETRY] Order placement attempt {attempt + 1}/{max_retries} failed: {last_error}")
+
+                        if attempt < max_retries - 1:
+                            import time as time_sleep
+                            time_sleep.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            logger.error(f"[RETRY EXHAUSTED] All {max_retries} attempts failed for {account_name}")
+                            response = {'status': 'error', 'message': f'API error after {max_retries} retries: {last_error}'}
+
+                # Handle case where response is None
+                if not response:
+                    response = {'status': 'error', 'message': f'No response from OpenAlgo API: {last_error}'}
 
                 if response.get('status') == 'success':
                     order_id = response.get('orderid')
@@ -343,8 +370,40 @@ class StrategyExecutor:
                         logger.info(f"[THREAD SUCCESS] Leg {leg.leg_number} order placed on {account_name}, order_id: {order_id} (polling in background)")
 
                 else:
+                    # Order failed - create execution record for visibility and tracking
                     error_msg = response.get('message', 'Order placement failed')
                     logger.error(f"[THREAD FAILED] Leg {leg.leg_number} failed on {account_name}: {error_msg}")
+
+                    # Create execution record for failed order (for tracking and visibility)
+                    try:
+                        failed_execution = StrategyExecution(
+                            strategy_id=self.strategy.id,
+                            account_id=account_id,
+                            leg_id=leg.id,
+                            order_id=None,  # No order ID since it failed
+                            symbol=symbol,
+                            exchange=exchange,
+                            quantity=quantity,
+                            status='failed',
+                            broker_order_status='rejected',  # Mark as rejected since order didn't go through
+                            entry_time=datetime.utcnow(),
+                            entry_price=None,
+                            error_message=error_msg[:500]  # Store error (truncate if too long)
+                        )
+
+                        with self.lock:
+                            db.session.add(failed_execution)
+                            # Try to commit, but don't fail if it doesn't work
+                            try:
+                                db.session.commit()
+                                logger.info(f"[FAILED ORDER TRACKED] Created execution record for failed order on {account_name}")
+                            except Exception as commit_error:
+                                logger.warning(f"Could not commit failed execution record: {commit_error}")
+                                db.session.rollback()
+
+                    except Exception as tracking_error:
+                        logger.warning(f"Could not create tracking record for failed order: {tracking_error}")
+
                     with self.lock:
                         results.append({
                             'account': account_name,
