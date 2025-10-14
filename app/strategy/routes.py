@@ -292,7 +292,8 @@ def execute_strategy(strategy_id):
         results = executor.execute()
 
         # Count successful, failed, and skipped executions
-        successful = sum(1 for r in results if r.get('status') == 'success')
+        # With Phase 2: 'pending' means order placed successfully, being tracked in background
+        successful = sum(1 for r in results if r.get('status') in ['success', 'pending'])
         failed = sum(1 for r in results if r.get('status') in ['failed', 'error'])
         skipped = sum(1 for r in results if r.get('status') == 'skipped')
 
@@ -312,7 +313,7 @@ def execute_strategy(strategy_id):
         elif successful > 0:
             # All successful
             overall_status = 'success'
-            message = f'Strategy executed successfully: {successful} orders placed'
+            message = f'Strategy executed successfully: {successful} order(s) placed and being tracked'
         else:
             # No orders processed
             overall_status = 'error'
