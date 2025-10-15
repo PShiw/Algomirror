@@ -134,101 +134,93 @@
         <!-- Risk Management Card -->
         <div class="card bg-base-100 shadow-lg mb-6">
             <div class="card-body">
-                <h2 class="card-title mb-4">Risk Management</h2>
-                <p class="text-sm text-base-content/70 mb-4">Choose ONE risk management strategy - options are mutually exclusive</p>
+                <h2 class="card-title mb-2">Risk Management</h2>
+                <p class="text-xs text-base-content/60 mb-4">Choose ONE strategy - options are mutually exclusive</p>
 
-                <!-- Traditional Risk Management -->
-                <div id="traditional-risk-section">
-                    <div class="flex items-center mb-3">
-                        <input type="radio" id="useTraditionalRisk" name="riskManagementType" value="traditional"
-                               class="radio radio-primary" checked onchange="toggleRiskManagementType()">
-                        <label for="useTraditionalRisk" class="label ml-2 cursor-pointer">
-                            <span class="label-text font-semibold">Traditional Risk Management (Max Loss/Profit, Trailing SL)</span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 ml-6" id="traditional-risk-fields">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Max Loss (₹)</span>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <!-- Traditional Risk Management Column -->
+                    <div class="border rounded-lg p-4" id="traditional-risk-section">
+                        <div class="flex items-center gap-2 mb-3">
+                            <input type="radio" id="useTraditionalRisk" name="riskManagementType" value="traditional"
+                                   class="radio radio-primary radio-sm" checked onchange="toggleRiskManagementType()">
+                            <label for="useTraditionalRisk" class="cursor-pointer">
+                                <span class="font-semibold text-sm">Traditional</span>
                             </label>
-                            <input type="number" id="maxLoss" class="input input-bordered"
-                                   placeholder="5000" value="{{ strategy.max_loss if strategy else '' }}">
                         </div>
-
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Max Profit (₹)</span>
-                            </label>
-                            <input type="number" id="maxProfit" class="input input-bordered"
-                                   placeholder="10000" value="{{ strategy.max_profit if strategy else '' }}">
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Trailing Stop Loss (%)</span>
-                            </label>
-                            <input type="number" id="trailingSl" class="input input-bordered"
-                                   placeholder="20" step="0.1" value="{{ strategy.trailing_sl if strategy else '' }}">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="divider">OR</div>
-
-                <!-- Supertrend-based Exit -->
-                <div id="supertrend-risk-section">
-                    <div class="flex items-center mb-3">
-                        <input type="radio" id="useSupertrendExit" name="riskManagementType" value="supertrend"
-                               class="radio radio-primary" onchange="toggleRiskManagementType()"
-                               {% if strategy and strategy.supertrend_exit_enabled %}checked{% endif %}>
-                        <label for="useSupertrendExit" class="label ml-2 cursor-pointer">
-                            <span class="label-text font-semibold">Supertrend-based Exit (Monitors combined spread)</span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 ml-6" id="supertrend-risk-fields">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Exit Type</span>
-                            </label>
-                            <select id="supertrendExitType" class="select select-bordered" disabled>
-                                <option value="breakout" {% if strategy and strategy.supertrend_exit_type == 'breakout' %}selected{% endif %}>Upper Breakout (Price closes above Supertrend)</option>
-                                <option value="breakdown" {% if strategy and strategy.supertrend_exit_type == 'breakdown' %}selected{% endif %}>Downside Breakdown (Price closes below Supertrend)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Timeframe</span>
-                            </label>
-                            <select id="supertrendTimeframe" class="select select-bordered" disabled>
-                                <option value="1m" {% if strategy and strategy.supertrend_timeframe == '1m' %}selected{% endif %}>1 Minute</option>
-                                <option value="5m" {% if strategy and strategy.supertrend_timeframe == '5m' %}selected{% elif not strategy %}selected{% endif %}>5 Minutes (Default)</option>
-                                <option value="15m" {% if strategy and strategy.supertrend_timeframe == '15m' %}selected{% endif %}>15 Minutes</option>
-                            </select>
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Supertrend Period (ATR)</span>
-                            </label>
-                            <input type="number" id="supertrendPeriod" class="input input-bordered"
-                                   placeholder="7" min="5" max="20" disabled
-                                   value="{{ strategy.supertrend_period if strategy and strategy.supertrend_period else '7' }}">
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Supertrend Multiplier</span>
-                            </label>
-                            <input type="number" id="supertrendMultiplier" class="input input-bordered"
-                                   placeholder="3.0" min="1" max="10" step="0.5" disabled
-                                   value="{{ strategy.supertrend_multiplier if strategy and strategy.supertrend_multiplier else '3.0' }}">
+                        <div class="space-y-3" id="traditional-risk-fields">
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Max Loss (₹)</span>
+                                </label>
+                                <input type="number" id="maxLoss" class="input input-bordered input-sm"
+                                       placeholder="5000" value="{{ strategy.max_loss if strategy else '' }}">
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Max Profit (₹)</span>
+                                </label>
+                                <input type="number" id="maxProfit" class="input input-bordered input-sm"
+                                       placeholder="10000" value="{{ strategy.max_profit if strategy else '' }}">
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Trailing SL (%)</span>
+                                </label>
+                                <input type="number" id="trailingSl" class="input input-bordered input-sm"
+                                       placeholder="20" step="0.1" value="{{ strategy.trailing_sl if strategy else '' }}">
+                            </div>
                         </div>
                     </div>
-                    <div class="alert alert-info mt-4 ml-6">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        <div>
-                            <p class="text-sm"><strong>Note:</strong> Exit triggers only once per strategy on candle close. Monitors combined spread with Supertrend indicator. All positions will be closed in parallel when the exit signal is triggered.</p>
+
+                    <!-- Supertrend Exit Column -->
+                    <div class="border rounded-lg p-4" id="supertrend-risk-section">
+                        <div class="flex items-center gap-2 mb-3">
+                            <input type="radio" id="useSupertrendExit" name="riskManagementType" value="supertrend"
+                                   class="radio radio-primary radio-sm" onchange="toggleRiskManagementType()"
+                                   {% if strategy and strategy.supertrend_exit_enabled %}checked{% endif %}>
+                            <label for="useSupertrendExit" class="cursor-pointer">
+                                <span class="font-semibold text-sm">Supertrend Exit</span>
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2" id="supertrend-risk-fields">
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Exit Type</span>
+                                </label>
+                                <select id="supertrendExitType" class="select select-bordered select-sm" disabled>
+                                    <option value="breakout" {% if strategy and strategy.supertrend_exit_type == 'breakout' %}selected{% endif %}>Breakout</option>
+                                    <option value="breakdown" {% if strategy and strategy.supertrend_exit_type == 'breakdown' %}selected{% endif %}>Breakdown</option>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Timeframe</span>
+                                </label>
+                                <select id="supertrendTimeframe" class="select select-bordered select-sm" disabled>
+                                    <option value="1m" {% if strategy and strategy.supertrend_timeframe == '1m' %}selected{% endif %}>1m</option>
+                                    <option value="5m" {% if strategy and strategy.supertrend_timeframe == '5m' %}selected{% elif not strategy %}selected{% endif %}>5m</option>
+                                    <option value="15m" {% if strategy and strategy.supertrend_timeframe == '15m' %}selected{% endif %}>15m</option>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Period</span>
+                                </label>
+                                <input type="number" id="supertrendPeriod" class="input input-bordered input-sm"
+                                       placeholder="7" min="5" max="20" disabled
+                                       value="{{ strategy.supertrend_period if strategy and strategy.supertrend_period else '7' }}">
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-xs">Multiplier</span>
+                                </label>
+                                <input type="number" id="supertrendMultiplier" class="input input-bordered input-sm"
+                                       placeholder="3.0" min="1" max="10" step="0.5" disabled
+                                       value="{{ strategy.supertrend_multiplier if strategy and strategy.supertrend_multiplier else '3.0' }}">
+                            </div>
+                        </div>
+                        <div class="mt-3 text-xs text-base-content/70">
+                            <strong>Note:</strong> Exits once on candle close when signal triggers.
                         </div>
                     </div>
                 </div>
@@ -439,10 +431,10 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <!-- Row 1: Instrument, Product Type, Expiry, Action -->
+        <!-- Row 1 -->
+        <div class="grid gap-2 mb-2" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">1. Instrument</span></label>
+                <label class="label py-1"><span class="label-text text-xs">1. Instrument</span></label>
                 <select class="select select-bordered select-sm leg-instrument">
                     <option value="NIFTY">NIFTY</option>
                     <option value="BANKNIFTY">BANKNIFTY</option>
@@ -453,7 +445,7 @@
             </div>
 
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">2. Product Type</span></label>
+                <label class="label py-1"><span class="label-text text-xs">2. Product Type</span></label>
                 <select class="select select-bordered select-sm leg-product-type" onchange="toggleOptionFields(this)">
                     <option value="options">Options</option>
                     <option value="futures">Futures</option>
@@ -461,7 +453,7 @@
             </div>
 
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">3. Expiry</span></label>
+                <label class="label py-1"><span class="label-text text-xs">3. Expiry</span></label>
                 <select class="select select-bordered select-sm leg-expiry">
                     <option value="current_week">Current Week</option>
                     <option value="next_week">Next Week</option>
@@ -471,16 +463,15 @@
             </div>
 
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">4. Action</span></label>
+                <label class="label py-1"><span class="label-text text-xs">4. Action</span></label>
                 <select class="select select-bordered select-sm leg-action">
                     <option value="BUY">BUY</option>
                     <option value="SELL">SELL</option>
                 </select>
             </div>
 
-            <!-- Row 2: Option Type, Strike Selection, Strike Price/Offset, Lots -->
             <div class="form-control option-field">
-                <label class="label"><span class="label-text text-xs">5. Option Type</span></label>
+                <label class="label py-1"><span class="label-text text-xs">5. Option Type</span></label>
                 <select class="select select-bordered select-sm leg-option-type">
                     <option value="CE">Call (CE)</option>
                     <option value="PE">Put (PE)</option>
@@ -488,7 +479,7 @@
             </div>
 
             <div class="form-control option-field">
-                <label class="label"><span class="label-text text-xs">6. Strike Selection</span></label>
+                <label class="label py-1"><span class="label-text text-xs">6. Strike Selection</span></label>
                 <select class="select select-bordered select-sm leg-strike-selection" onchange="toggleStrikeInput(this)">
                     <option value="ATM">ATM (At The Money)</option>
                     <optgroup label="In The Money">
@@ -539,20 +530,22 @@
                     <option value="premium_near">Premium Near</option>
                 </select>
             </div>
+        </div>
 
+        <!-- Row 2 -->
+        <div class="grid gap-2" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs leg-strike-label">7. Strike Value</span></label>
+                <label class="label py-1"><span class="label-text text-xs leg-strike-label">7. Strike Value</span></label>
                 <input type="number" class="input input-bordered input-sm leg-strike-value" placeholder="Auto" disabled>
             </div>
 
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">8. Lots (Max: 100)</span></label>
+                <label class="label py-1"><span class="label-text text-xs">8. Lots (Max: 100)</span></label>
                 <input type="number" class="input input-bordered input-sm leg-lots" value="1" min="1" max="100">
             </div>
 
-            <!-- Row 3: Order Type, Limit Price -->
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">9. Order Type</span></label>
+                <label class="label py-1"><span class="label-text text-xs">9. Order Type</span></label>
                 <select class="select select-bordered select-sm leg-order-type" onchange="togglePriceFields(this)">
                     <option value="MARKET">MARKET</option>
                     <option value="LIMIT">LIMIT</option>
@@ -560,19 +553,17 @@
             </div>
 
             <div class="form-control limit-price-field" style="display:none;">
-                <label class="label"><span class="label-text text-xs">Limit Price</span></label>
+                <label class="label py-1"><span class="label-text text-xs">Limit Price</span></label>
                 <input type="number" class="input input-bordered input-sm leg-limit-price" placeholder="0.00" step="0.05">
             </div>
 
-
-            <!-- Row 4: SL%, TP% -->
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">Stop Loss (%)</span></label>
+                <label class="label py-1"><span class="label-text text-xs">Stop Loss (%)</span></label>
                 <input type="number" class="input input-bordered input-sm leg-sl" placeholder="%" step="0.1">
             </div>
 
             <div class="form-control">
-                <label class="label"><span class="label-text text-xs">Take Profit (%)</span></label>
+                <label class="label py-1"><span class="label-text text-xs">Take Profit (%)</span></label>
                 <input type="number" class="input input-bordered input-sm leg-tp" placeholder="%" step="0.1">
             </div>
         </div>

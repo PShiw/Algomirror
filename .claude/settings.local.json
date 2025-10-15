@@ -33,7 +33,8 @@
       "Bash(cmd /c:*)",
       "Bash(iconv:*)",
       "WebFetch(domain:tradingview.github.io)",
-      "Bash(.venvScriptsactivate)"
+      "Bash(.venvScriptsactivate)",
+      "Bash(npm run build-css:*)"
     ],
     "deny": [],
     "ask": []
