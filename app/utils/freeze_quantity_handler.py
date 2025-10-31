@@ -99,17 +99,35 @@ def place_order_with_freeze_check(client, user_id: int, **order_params) -> Dict:
         logger.info(f"Placing split order: {quantity} qty with split size {freeze_qty}")
 
         # Extract parameters for splitorder
-        response = client.splitorder(
-            symbol=order_params.get('symbol'),
-            exchange=order_params.get('exchange'),
-            action=order_params.get('action'),
-            quantity=quantity,
-            splitsize=freeze_qty,
-            price_type=order_params.get('price_type', 'MARKET'),
-            product=order_params.get('product', 'MIS'),
-            price=order_params.get('price', 0),
-            trigger_price=order_params.get('trigger_price', 0)
-        )
+        # Build splitorder parameters dynamically based on order type
+        splitorder_params = {
+            'strategy': order_params.get('strategy', 'AlgoMirror'),
+            'symbol': order_params.get('symbol'),
+            'exchange': order_params.get('exchange'),
+            'action': order_params.get('action'),
+            'quantity': quantity,
+            'splitsize': freeze_qty,
+            'price_type': order_params.get('price_type', 'MARKET'),
+            'product': order_params.get('product', 'MIS')
+        }
+
+        # Add price/trigger_price based on order type
+        price_type = order_params.get('price_type', 'MARKET')
+
+        # For LIMIT orders: price is required
+        if price_type == 'LIMIT':
+            splitorder_params['price'] = order_params.get('price', 0)
+
+        # For SL/SL-M orders: both price and trigger_price may be needed
+        elif price_type in ['SL', 'SL-M']:
+            if order_params.get('price'):
+                splitorder_params['price'] = order_params.get('price')
+            if order_params.get('trigger_price'):
+                splitorder_params['trigger_price'] = order_params.get('trigger_price')
+
+        # For MARKET orders: no price or trigger_price needed (already handled above)
+
+        response = client.splitorder(**splitorder_params)
 
         # Transform splitorder response to match placeorder format
         if response.get('status') == 'success':

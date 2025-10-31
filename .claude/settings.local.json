@@ -34,7 +34,8 @@
       "Bash(iconv:*)",
       "WebFetch(domain:tradingview.github.io)",
       "Bash(.venvScriptsactivate)",
-      "Bash(npm run build-css:*)"
+      "Bash(npm run build-css:*)",
+      "WebFetch(domain:docs.openalgo.in)"
     ],
     "deny": [],
     "ask": []
