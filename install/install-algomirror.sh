@@ -215,9 +215,27 @@ check_status "Failed to create base directory"
 log_message "\nCloning AlgoMirror repository..." "$BLUE"
 # Note: Update this URL with actual repository URL when available
 sudo git clone https://github.com/marketcalls/algomirror.git $ALGOMIRROR_PATH 2>/dev/null || {
-    log_message "Note: Using local installation method (repository not yet public)" "$YELLOW"
+    log_message "Note: Repository clone failed. Manual file upload required." "$YELLOW"
     # If repository not available, create directory structure
     sudo mkdir -p $ALGOMIRROR_PATH
+    log_message "Please upload AlgoMirror files to: $ALGOMIRROR_PATH" "$YELLOW"
+    log_message "Use: scp -r /path/to/algomirror/* root@server:$ALGOMIRROR_PATH/" "$BLUE"
+    read -p "Press Enter after uploading files to continue..."
+
+    # Verify critical files exist
+    if [ ! -f "$ALGOMIRROR_PATH/wsgi.py" ]; then
+        log_message "Error: wsgi.py not found. Please upload all application files." "$RED"
+        exit 1
+    fi
+    if [ ! -f "$ALGOMIRROR_PATH/init_db.py" ]; then
+        log_message "Error: init_db.py not found. Please upload all application files." "$RED"
+        exit 1
+    fi
+    if [ ! -d "$ALGOMIRROR_PATH/app" ]; then
+        log_message "Error: app directory not found. Please upload all application files." "$RED"
+        exit 1
+    fi
+    log_message "Application files verified successfully!" "$GREEN"
 }
 
 # Create virtual environment using uv
@@ -407,10 +425,13 @@ EOL
 
 check_status "Failed to configure environment file"
 
-# Create instance directory for SQLite database
-log_message "\nCreating instance directory..." "$BLUE"
+# Create required directories
+log_message "\nCreating required directories..." "$BLUE"
 sudo mkdir -p $BASE_PATH/instance
 sudo mkdir -p $BASE_PATH/logs
+sudo mkdir -p $ALGOMIRROR_PATH/flask_session
+sudo mkdir -p $ALGOMIRROR_PATH/logs
+log_message "Created: instance, logs, flask_session directories" "$GREEN"
 
 # Initialize database
 log_message "\nInitializing database..." "$BLUE"
@@ -418,8 +439,16 @@ if [ -f "$ALGOMIRROR_PATH/init_db.py" ]; then
     cd $ALGOMIRROR_PATH
     sudo bash -c "$ACTIVATE_CMD && python init_db.py"
     check_status "Failed to initialize database"
+
+    # Verify database was created
+    if [ -f "$BASE_PATH/instance/algomirror.db" ]; then
+        log_message "Database initialized successfully at $BASE_PATH/instance/algomirror.db" "$GREEN"
+    else
+        log_message "Warning: Database file not found after initialization" "$YELLOW"
+    fi
 else
-    log_message "Warning: init_db.py not found, database needs manual initialization" "$YELLOW"
+    log_message "Error: init_db.py not found, cannot initialize database" "$RED"
+    exit 1
 fi
 
 # Set correct permissions
@@ -579,6 +608,16 @@ sudo systemctl start $SERVICE_NAME
 sudo systemctl restart nginx
 check_status "Failed to start services"
 
+# Verify service is running
+log_message "\nVerifying service status..." "$BLUE"
+sleep 3
+if sudo systemctl is-active --quiet $SERVICE_NAME; then
+    log_message "AlgoMirror service is running" "$GREEN"
+else
+    log_message "Warning: AlgoMirror service may not be running properly" "$YELLOW"
+    log_message "Check logs: sudo journalctl -u $SERVICE_NAME -n 50" "$BLUE"
+fi
+
 # Installation complete
 log_message "\n╔════════════════════════════════════════════════════════╗" "$GREEN"
 log_message "║       ALGOMIRROR INSTALLATION COMPLETED!               ║" "$GREEN"
@@ -611,7 +650,15 @@ log_message "\n=== Useful Commands ===" "$YELLOW"
 log_message "Check Status: sudo systemctl status $SERVICE_NAME" "$BLUE"
 log_message "View Logs: sudo journalctl -u $SERVICE_NAME -f" "$BLUE"
 log_message "Restart Service: sudo systemctl restart $SERVICE_NAME" "$BLUE"
-log_message "View Application Logs: tail -f $BASE_PATH/logs/*.log" "$BLUE"
+log_message "View Application Logs: tail -f $ALGOMIRROR_PATH/logs/algomirror.log" "$BLUE"
+log_message "View Error Logs: tail -f $BASE_PATH/logs/error.log" "$BLUE"
+
+log_message "\n=== Troubleshooting ===" "$YELLOW"
+log_message "If login fails with 'Internal Server Error':" "$BLUE"
+log_message "  1. Check application logs: tail -f $ALGOMIRROR_PATH/logs/algomirror.log" "$BLUE"
+log_message "  2. Verify flask_session directory exists: ls -la $ALGOMIRROR_PATH/flask_session" "$BLUE"
+log_message "  3. Check permissions: sudo chown -R www-data:www-data $BASE_PATH" "$BLUE"
+log_message "  4. Restart service: sudo systemctl restart $SERVICE_NAME" "$BLUE"
 
 log_message "\n=== Security Reminder ===" "$YELLOW"
 log_message "Your encryption key is: $ENCRYPTION_KEY" "$RED"
