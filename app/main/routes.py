@@ -19,93 +19,89 @@ def index():
 @main_bp.route('/dashboard')
 @login_required
 def dashboard():
-    # Check if user has any accounts
-    accounts = current_user.get_active_accounts()
-    
+    """Strategy dashboard showing active strategies and account status (migrated from /strategy)"""
+    from app.models import Strategy, StrategyExecution
+    from datetime import datetime, timedelta
+
+    # Get user's strategies
+    strategies = Strategy.query.filter_by(user_id=current_user.id).order_by(Strategy.created_at.desc()).all()
+
+    # Get user's active accounts
+    accounts = TradingAccount.query.filter_by(
+        user_id=current_user.id,
+        is_active=True
+    ).all()
+
+    # If no accounts, redirect to add account page
     if not accounts:
         return redirect(url_for('accounts.add'))
-    
-    # Aggregate data from all accounts
-    dashboard_data = {
-        'total_accounts': len(accounts),
-        'connected_accounts': 0,
-        'total_funds': 0.0,
-        'total_pnl': 0.0,
-        'total_positions': 0,
-        'total_holdings': 0,
-        'accounts_summary': []
-    }
-    
+
+    # Calculate today's P&L across all strategies
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_executions = StrategyExecution.query.join(Strategy).filter(
+        Strategy.user_id == current_user.id,
+        StrategyExecution.created_at >= today_start
+    ).all()
+
+    # Calculate P&L only from successful executions (exclude rejected/failed)
+    today_pnl = sum(
+        e.realized_pnl or 0
+        for e in today_executions
+        if e.realized_pnl and e.status != 'failed'
+        and not (hasattr(e, 'broker_order_status') and e.broker_order_status in ['rejected', 'cancelled'])
+    )
+
+    # Get active strategy count
+    active_strategies = [s for s in strategies if s.is_active]
+
+    # Convert strategies to dictionaries for JSON serialization
+    strategies_data = []
+    for strategy in strategies:
+        strategies_data.append({
+            'id': strategy.id,
+            'name': strategy.name,
+            'description': strategy.description,
+            'market_condition': strategy.market_condition,
+            'risk_profile': strategy.risk_profile,
+            'is_active': strategy.is_active,
+            'created_at': strategy.created_at.isoformat() if strategy.created_at else None,
+            'updated_at': strategy.updated_at.isoformat() if strategy.updated_at else None,
+            'selected_accounts': strategy.selected_accounts or [],
+            'allocation_type': strategy.allocation_type,
+            'max_loss': strategy.max_loss,
+            'max_profit': strategy.max_profit,
+            'trailing_sl': strategy.trailing_sl,
+            # Per-strategy P&L calculation using new properties
+            'total_pnl': strategy.total_pnl,
+            'realized_pnl': strategy.realized_pnl,
+            'unrealized_pnl': strategy.unrealized_pnl
+        })
+
+    # Convert accounts to dictionaries for JSON serialization
+    accounts_data = []
     for account in accounts:
-        account_summary = {
+        accounts_data.append({
             'id': account.id,
-            'name': account.account_name,
-            'broker': account.broker_name,
-            'status': account.connection_status,
-            'last_update': account.last_data_update,
-            'funds': 0.0,
-            'pnl': 0.0,
-            'positions': 0,
-            'holdings': 0
-        }
-        
-        if account.connection_status == 'connected':
-            dashboard_data['connected_accounts'] += 1
-        
-        # Process funds data
-        if account.last_funds_data:
-            try:
-                available_cash = float(account.last_funds_data.get('availablecash', 0))
-                m2m_realized = float(account.last_funds_data.get('m2mrealized', 0))
-                m2m_unrealized = float(account.last_funds_data.get('m2munrealized', 0))
-                
-                account_summary['funds'] = available_cash
-                account_summary['pnl'] = m2m_realized + m2m_unrealized
-                
-                dashboard_data['total_funds'] += available_cash
-                dashboard_data['total_pnl'] += m2m_realized + m2m_unrealized
-            except (ValueError, TypeError):
-                pass
-        
-        # Process positions data
-        if account.last_positions_data:
-            try:
-                positions = account.last_positions_data if isinstance(account.last_positions_data, list) else []
-                account_summary['positions'] = len([p for p in positions if float(p.get('quantity', 0)) != 0])
-                dashboard_data['total_positions'] += account_summary['positions']
-            except (ValueError, TypeError):
-                pass
-        
-        # Process holdings data
-        if account.last_holdings_data:
-            try:
-                holdings_data = account.last_holdings_data
-                if isinstance(holdings_data, dict) and 'holdings' in holdings_data:
-                    holdings = holdings_data['holdings']
-                    account_summary['holdings'] = len(holdings) if isinstance(holdings, list) else 0
-                else:
-                    account_summary['holdings'] = len(holdings_data) if isinstance(holdings_data, list) else 0
-                
-                dashboard_data['total_holdings'] += account_summary['holdings']
-            except (ValueError, TypeError):
-                pass
-        
-        dashboard_data['accounts_summary'].append(account_summary)
-    
-    # Recent activity (last 10 activities)
-    recent_activities = current_user.logs.order_by(
-        desc(ActivityLog.created_at)
-    ).limit(10).all()
-    
+            'account_name': account.account_name,
+            'broker_name': account.broker_name,
+            'is_primary': account.is_primary,
+            'connection_status': account.connection_status
+        })
+
     current_app.logger.info(
         f'Dashboard accessed by user {current_user.username}',
         extra={
             'event': 'dashboard_access',
             'user_id': current_user.id,
-            'accounts_count': len(accounts)
+            'accounts_count': len(accounts),
+            'strategies_count': len(strategies)
         }
     )
-    
-    return render_template('main/dashboard.html', 
-                         dashboard_data=dashboard_data,
-                         recent_activities=recent_activities)
+
+    return render_template('main/dashboard.html',
+                         strategies=strategies,
+                         strategies_json=strategies_data,
+                         accounts=accounts,
+                         accounts_json=accounts_data,
+                         today_pnl=today_pnl,
+                         active_strategies=len(active_strategies))

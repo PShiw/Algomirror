@@ -1,309 +1,907 @@
 {% extends "layout.html" %}
-{% from 'macros/account_badge.html' import account_badge, account_dot, get_account_badge_color %}
 
 {% block title %}Dashboard - AlgoMirror{% endblock %}
 
-{% block page_title %}Dashboard{% endblock %}
-
 {% block content %}
-<!-- Set page metadata for ping monitoring -->
-<script>
-    document.body.dataset.page = 'dashboard';
-    document.body.dataset.authenticated = 'true';
-</script>
-
-<div class="space-y-6">
-    <!-- Welcome Header -->
-    <div class="flex justify-between items-center">
+<div class="container mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
         <div>
-            <h1 class="text-3xl font-bold">Welcome back, {{ current_user.username }}!</h1>
-            <p class="text-base-content/70 mt-1">Here's an overview of your trading accounts</p>
+            <h1 class="text-3xl font-bold">Multi-Strategy Trading Platform</h1>
+            <p class="text-base-content/70 mt-1">Manage unlimited strategies across multiple accounts</p>
         </div>
-        <div class="flex gap-2">
-            <button onclick="refreshAllData()" class="btn btn-ghost btn-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        <div class="flex gap-3 items-center">
+            <!-- Market Status Indicator -->
+            <div id="marketStatusBadge" class="badge badge-lg gap-2" style="display: none;">
+                <span class="loading loading-spinner loading-xs"></span>
+                <span id="marketStatusText">Checking...</span>
+            </div>
+
+            <select class="select select-bordered" id="marketCondition">
+                <option value="">Market Condition: All</option>
+                <option value="non_expiry">Non-Expiry</option>
+                <option value="expiry">Expiry Day</option>
+            </select>
+
+            <!-- Manual Refresh Button -->
+            <button onclick="manualRefresh()" class="btn btn-ghost btn-sm" title="Refresh data manually">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                 </svg>
-                Refresh All
             </button>
-            <a href="{{ url_for('accounts.add') }}" class="btn btn-primary btn-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+
+            <a href="{{ url_for('strategy.create_new_strategy') }}" class="btn btn-primary">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
-                Add Account
+                New Strategy
             </a>
         </div>
     </div>
 
-    <!-- Summary Stats -->
-    <div class="stats shadow w-full">
-        <div class="stat">
-            <div class="stat-figure text-primary">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-4m-5 0H3m2 0h4M9 3h6M9 5h6M9 7h6M9 9h6"></path>
-                </svg>
-            </div>
-            <div class="stat-title">Total Accounts</div>
-            <div class="stat-value text-primary">{{ dashboard_data.total_accounts }}</div>
-            <div class="stat-desc">
-                <span id="connection-status-summary" class="font-semibold text-success">
-                    {{ dashboard_data.connected_accounts }}/{{ dashboard_data.total_accounts }} Connected
-                </span>
-            </div>
-        </div>
+    <!-- Account Cards Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        {% for account in accounts %}
+        <div class="card bg-base-100 shadow-lg" id="account-card-{{ account.id }}">
+            <div class="card-body">
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <h3 class="font-semibold text-lg">{{ account.account_name }}</h3>
+                        <p class="text-sm text-base-content/60">{{ account.broker_name }}</p>
+                    </div>
+                    <span class="badge badge-success badge-sm">Connected</span>
+                </div>
 
-        <div class="stat">
-            <div class="stat-figure text-secondary">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
-                </svg>
-            </div>
-            <div class="stat-title">Available Funds</div>
-            <div class="stat-value">₹{{ "%.2f"|format(dashboard_data.total_funds) }}</div>
-            <div class="stat-desc">Across all accounts</div>
-        </div>
+                <div class="space-y-2">
+                    <div class="flex justify-between">
+                        <span class="text-sm">Available:</span>
+                        <span class="font-semibold" id="available-{{ account.id }}">
+                            <span class="loading loading-spinner loading-xs"></span>
+                        </span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-sm">Used Margin:</span>
+                        <span class="font-semibold" id="margin-{{ account.id }}">
+                            <span class="loading loading-spinner loading-xs"></span>
+                        </span>
+                    </div>
 
-        <div class="stat">
-            <div class="stat-figure {{ 'text-success' if dashboard_data.total_pnl >= 0 else 'text-error' }}">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' if dashboard_data.total_pnl >= 0 else 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6' }}"></path>
-                </svg>
-            </div>
-            <div class="stat-title">Total P&L</div>
-            <div class="stat-value {{ 'text-success' if dashboard_data.total_pnl >= 0 else 'text-error' }}">
-                ₹{{ "%.2f"|format(dashboard_data.total_pnl) }}
-            </div>
-            <div class="stat-desc">Mark-to-market</div>
-        </div>
+                    <!-- Active Strategies -->
+                    <div class="pt-2 border-t">
+                        <p class="text-sm text-base-content/60">Active Strategies</p>
+                        <p class="text-center py-2 text-sm text-base-content/50" id="active-strat-{{ account.id }}">0</p>
+                    </div>
+                </div>
 
-        <div class="stat">
-            <div class="stat-figure text-accent">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                </svg>
+                <!-- Today's P&L -->
+                <div class="flex justify-between items-center pt-3 border-t">
+                    <span class="text-sm">Today's P&L</span>
+                    <span class="font-bold" id="pnl-account-{{ account.id }}">
+                        <span class="loading loading-spinner loading-xs"></span>
+                    </span>
+                </div>
             </div>
-            <div class="stat-title">Positions</div>
-            <div class="stat-value text-accent">{{ dashboard_data.total_positions }}</div>
-            <div class="stat-desc">{{ dashboard_data.total_holdings }} holdings</div>
         </div>
+        {% endfor %}
     </div>
 
-    <!-- Accounts Overview -->
-    {% if dashboard_data.accounts_summary %}
-    <div class="card bg-base-100 shadow-xl">
+    <!-- Strategy Templates Section -->
+    <div class="card bg-base-100 shadow-lg mb-6">
         <div class="card-body">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="card-title">Accounts Overview</h2>
-                <a href="{{ url_for('accounts.manage') }}" class="btn btn-ghost btn-sm">Manage All</a>
-            </div>
-            
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {% for account in dashboard_data.accounts_summary %}
-                <div class="card bg-base-200 shadow-sm">
-                    <div class="card-body p-4">
-                        <div class="flex justify-between items-start">
-                            <div class="flex items-center gap-2">
-                                <!-- Account color indicator -->
-                                {{ account_dot(account.id, account.name + ' · ' + account.broker) }}
-                                <!-- Connection status overlay -->
-                                <div id="account-status-{{ account.id }}" class="w-3 h-3 rounded-full {{ 'bg-success' if account.status == 'connected' else 'bg-error' if account.status == 'failed' else 'bg-warning' }} ring-2 ring-base-100 -ml-4 relative z-10" title="{{ account.name }}: {{ account.status }}"></div>
-                                <div class="ml-1">
-                                    <h3 class="font-semibold">{{ account.name }}</h3>
-                                    <p class="text-sm opacity-70">{{ account.broker }}</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <button onclick="window.pingMonitor?.forceCheckAccount({{ account.id }})" class="btn btn-ghost btn-xs" title="Force ping check">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                </button>
-                                <div class="badge badge-{{ 'success' if account.status == 'connected' else 'error' if account.status == 'failed' else 'warning' }} badge-sm">
-                                    {{ account.status }}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="grid grid-cols-3 gap-2 mt-4 text-center">
-                            <div>
-                                <div class="text-xs opacity-70">Funds</div>
-                                <div class="font-mono text-sm">₹{{ "%.0f"|format(account.funds) }}</div>
-                            </div>
-                            <div>
-                                <div class="text-xs opacity-70">P&L</div>
-                                <div class="font-mono text-sm {{ 'text-success' if account.pnl >= 0 else 'text-error' }}">
-                                    ₹{{ "%.2f"|format(account.pnl) }}
-                                </div>
-                            </div>
-                            <div>
-                                <div class="text-xs opacity-70">Positions</div>
-                                <div class="font-mono text-sm">{{ account.positions }}</div>
-                            </div>
-                        </div>
-                        
-                        {% if account.last_update %}
-                        <div class="text-xs opacity-50 mt-2">
-                            Updated: {{ account.last_update.strftime('%H:%M') }}
-                        </div>
-                        {% endif %}
-                        
-                        <div class="card-actions justify-end mt-2">
-                            <button onclick="refreshAccountData({{ account.id }})" class="btn btn-ghost btn-xs">Refresh</button>
-                        </div>
-                    </div>
+                <h2 class="card-title">Strategy Templates</h2>
+                <div class="flex gap-2">
+                    <button onclick="checkExpiredExecutions()" class="btn btn-ghost btn-sm" title="Check for expired positions">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Check Expired
+                    </button>
+                    <a href="{{ url_for('strategy.templates') }}" class="btn btn-ghost btn-sm">
+                        Manage Templates
+                        <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </a>
                 </div>
-                {% endfor %}
             </div>
+
+            {% if strategies|length == 0 %}
+            <div class="text-center py-8">
+                <p class="text-base-content/60 mb-4">No templates created yet</p>
+                <a href="{{ url_for('strategy.create_new_strategy') }}" class="link link-primary">Create your first template</a>
+            </div>
+            {% else %}
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Strategy Name</th>
+                            <th>Type</th>
+                            <th>Risk Profile</th>
+                            <th>Accounts</th>
+                            <th>Positions</th>
+                            <th>P&L</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for strategy in strategies[:5] %}
+                        <tr>
+                            <td class="font-medium">{{ strategy.name }}</td>
+                            <td>
+                                <span class="badge badge-sm">
+                                    {{ strategy.legs.count() }} Leg{% if strategy.legs.count() != 1 %}s{% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge badge-sm {% if strategy.risk_profile == 'conservative' %}badge-success{% elif strategy.risk_profile == 'balanced' %}badge-warning{% else %}badge-error{% endif %}">
+                                    {{ strategy.risk_profile|title if strategy.risk_profile else 'Balanced' }}
+                                </span>
+                            </td>
+                            <td>{{ strategy.selected_accounts|length if strategy.selected_accounts else 0 }}</td>
+                            <td>
+                                <span class="badge badge-outline badge-sm" id="positions-{{ strategy.id }}">0</span>
+                            </td>
+                            <td>
+                                <span class="font-semibold" id="pnl-{{ strategy.id }}">₹0</span>
+                            </td>
+                            <td>
+                                {% if strategy.is_active %}
+                                <span class="badge badge-success badge-sm">Active</span>
+                                {% else %}
+                                <span class="badge badge-ghost badge-sm">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="flex gap-2">
+                                    <button onclick="executeStrategy({{ strategy.id }})" class="btn btn-primary btn-xs">Execute</button>
+                                    <a href="{{ url_for('strategy.builder', strategy_id=strategy.id) }}" class="btn btn-ghost btn-xs">View</a>
+                                    <button id="close-btn-{{ strategy.id }}" onclick="closePositions({{ strategy.id }})" class="btn btn-error btn-xs" style="display: none;">Close</button>
+                                    <button onclick="deleteStrategy({{ strategy.id }})" class="btn btn-ghost btn-xs">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
         </div>
     </div>
-    {% endif %}
 
-    <!-- Quick Actions -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <a href="{{ url_for('trading.funds') }}" class="card bg-gradient-to-r from-primary to-primary-focus text-primary-content shadow-xl hover:shadow-2xl transition-shadow">
-            <div class="card-body items-center text-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                </svg>
-                <h3 class="font-bold">Funds</h3>
-                <p class="text-sm opacity-90">View funds across accounts</p>
-            </div>
-        </a>
-        
-        <a href="{{ url_for('trading.positions') }}" class="card bg-gradient-to-r from-secondary to-secondary-focus text-secondary-content shadow-xl hover:shadow-2xl transition-shadow">
-            <div class="card-body items-center text-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <h3 class="font-bold">Positions</h3>
-                <p class="text-sm opacity-90">Monitor open positions</p>
-            </div>
-        </a>
-        
-        <a href="{{ url_for('trading.orderbook') }}" class="card bg-gradient-to-r from-accent to-accent-focus text-accent-content shadow-xl hover:shadow-2xl transition-shadow">
-            <div class="card-body items-center text-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <h3 class="font-bold">Orders</h3>
-                <p class="text-sm opacity-90">View order history</p>
-            </div>
-        </a>
-        
-        <a href="{{ url_for('trading.holdings') }}" class="card bg-gradient-to-r from-success to-success-focus text-success-content shadow-xl hover:shadow-2xl transition-shadow">
-            <div class="card-body items-center text-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-                <h3 class="font-bold">Holdings</h3>
-                <p class="text-sm opacity-90">Investment portfolio</p>
-            </div>
-        </a>
-    </div>
-
-    <!-- Color Badge Test (Debug) -->
-    {% if current_user.is_authenticated %}
-    <div class="card bg-base-100 shadow-xl">
+    <!-- Active Positions Section -->
+    <div class="card bg-base-100 shadow-lg">
         <div class="card-body">
-            <h2 class="card-title">Account Color System Test</h2>
-            <div class="flex gap-2 flex-wrap">
-                {% for i in range(1, 8) %}
-                    {{ account_dot(i, 'Account ' + i|string) }}
-                    {{ account_badge('Account ' + i|string, i, 'Test Broker', 'sm') }}
-                {% endfor %}
-            </div>
-            <p class="text-xs opacity-50 mt-2">Each account gets a unique color based on its ID</p>
-        </div>
-    </div>
-    {% endif %}
+            <h2 class="card-title mb-4">Active Positions</h2>
 
-    <!-- Recent Activity -->
-    {% if recent_activities %}
-    <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-            <h2 class="card-title">Recent Activity</h2>
-            
-            <div class="space-y-3">
-                {% for activity in recent_activities %}
-                <div class="flex items-center gap-3 p-3 bg-base-200 rounded-lg">
-                    <div class="flex-shrink-0">
-                        {% if activity.status == 'success' %}
-                        <div class="badge badge-success badge-sm"></div>
-                        {% else %}
-                        <div class="badge badge-error badge-sm"></div>
-                        {% endif %}
-                    </div>
-                    <div class="flex-grow">
-                        <div class="font-medium">{{ activity.action.replace('_', ' ').title() }}</div>
-                        {% if activity.details %}
-                        <div class="text-sm opacity-70">
-                            {% if activity.details.account_name %}
-                            Account: {{ activity.details.account_name }}
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    </div>
-                    <div class="text-sm opacity-60">
-                        {{ activity.created_at.strftime('%H:%M') }}
-                    </div>
-                </div>
-                {% endfor %}
+            <div id="activePositions" class="text-center py-8 text-base-content/60">
+                <p>No active positions</p>
             </div>
         </div>
     </div>
-    {% endif %}
 </div>
 
+<!-- Expired Executions Modal -->
+<dialog id="expiredExecutionsModal" class="modal">
+    <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4">
+            <svg class="w-6 h-6 inline mr-2 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Expired Executions Found
+        </h3>
+        <div id="expiredExecutionsContent" class="py-4">
+            <!-- Content will be populated dynamically -->
+        </div>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn">Close</button>
+            </form>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Force Delete Confirmation Modal -->
+<dialog id="forceDeleteModal" class="modal">
+    <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4 text-error">
+            <svg class="w-6 h-6 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            Force Delete Strategy
+        </h3>
+        <div id="forceDeleteContent" class="py-4">
+            <!-- Content will be populated dynamically -->
+        </div>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-ghost">Cancel</button>
+            </form>
+            <button id="confirmForceDeleteBtn" class="btn btn-error">Force Delete</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- No Expired Executions Modal -->
+<dialog id="noExpiredModal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4 text-success">
+            <svg class="w-6 h-6 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            All Clear
+        </h3>
+        <p class="py-4">No expired executions found. All strategies are up to date!</p>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-success">OK</button>
+            </form>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Execute Strategy Confirmation Modal -->
+<dialog id="execute_strategy_modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg">Execute Strategy</h3>
+        <p class="py-4">Are you sure you want to execute this strategy?</p>
+        <p class="text-sm text-warning" id="marketWarning" style="display: none;">⚠️ Market is currently closed. Orders may be queued until market opens.</p>
+        <div class="modal-action">
+            <button class="btn btn-ghost" onclick="execute_strategy_modal.close()">Cancel</button>
+            <button class="btn btn-primary" onclick="confirmExecuteStrategy()">Execute</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Close Positions Confirmation Modal -->
+<dialog id="close_positions_modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg">Close All Positions</h3>
+        <p class="py-4">Are you sure you want to close all positions for this strategy?</p>
+        <p class="text-sm text-warning">This action will place market orders to exit all positions.</p>
+        <div class="modal-action">
+            <button class="btn btn-ghost" onclick="close_positions_modal.close()">Cancel</button>
+            <button class="btn btn-error" onclick="confirmClosePositions()">Close All Positions</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
 <script>
-function refreshAccountData(accountId) {
-    showToast('Refreshing account data...', 'info');
-    
-    fetchWithCSRF(`/accounts/refresh-data/${accountId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                showToast('Account data refreshed!', 'success');
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('Failed to refresh data: ' + data.message, 'error');
-            }
-        })
-        .catch(error => {
-            showToast('Error: ' + error.message, 'error');
-        });
+// Strategy Dashboard JavaScript (migrated from /strategy)
+// Trading hours management
+let isTradingHours = null; // null = not yet checked, true/false after first check
+let pollingIntervals = {
+    metrics: null,
+    funds: null,
+    pnl: null,
+    tradingHoursCheck: null
+};
+
+// Store current strategy ID for modal execution
+let currentStrategyId = null;
+
+// Execute Strategy - Show modal
+function executeStrategy(strategyId) {
+    currentStrategyId = strategyId;
+
+    // Check if market is open and show warning
+    const marketWarning = document.getElementById('marketWarning');
+    if (!isTradingHours && marketWarning) {
+        marketWarning.style.display = 'block';
+    } else if (marketWarning) {
+        marketWarning.style.display = 'none';
+    }
+
+    // Show modal
+    execute_strategy_modal.showModal();
 }
 
-function refreshAllData() {
-    showToast('Refreshing all account data...', 'info');
-    
-    // Refresh data for all accounts
-    const refreshPromises = [];
-    {% for account in dashboard_data.accounts_summary %}
-    refreshPromises.push(
-        fetchWithCSRF(`/accounts/refresh-data/{{ account.id }}`)
-            .then(response => response.json())
-    );
-    {% endfor %}
-    
-    Promise.all(refreshPromises)
-        .then(results => {
-            const successful = results.filter(r => r.status === 'success').length;
-            const total = results.length;
-            
-            if (successful === total) {
-                showToast('All account data refreshed successfully!', 'success');
-            } else {
-                showToast(`${successful}/${total} accounts refreshed successfully`, 'warning');
-            }
-            
-            setTimeout(() => location.reload(), 1000);
-        })
-        .catch(error => {
-            showToast('Error refreshing data: ' + error.message, 'error');
-        });
+// Confirm Execute Strategy - Actually execute after modal confirmation
+function confirmExecuteStrategy() {
+    if (!currentStrategyId) return;
+
+    execute_strategy_modal.close();
+
+    fetch(`/strategy/execute/${currentStrategyId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Handle different execution statuses
+        if (data.status === 'success') {
+            showNotification(data.message || 'Strategy executed successfully', 'success');
+            // Manually refresh data immediately
+            loadStrategyMetrics();
+            loadAccountFunds();
+            loadAccountPnL();
+            setTimeout(() => location.reload(), 1500);
+        } else if (data.status === 'warning') {
+            showNotification(data.message || 'Strategy execution skipped', 'warning');
+        } else if (data.status === 'partial') {
+            showNotification(data.message || 'Strategy partially executed', 'warning');
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showNotification(data.message || 'Failed to execute strategy', 'error');
+        }
+    })
+    .catch(error => {
+        showNotification('Error executing strategy', 'error');
+        console.error('Error:', error);
+    });
+
+    currentStrategyId = null;
 }
+
+// Manual refresh (works even outside trading hours)
+function manualRefresh() {
+    showNotification('Refreshing data...', 'info');
+    loadStrategyMetrics();
+    loadAccountFunds();
+    loadAccountPnL();
+}
+
+// Load strategy positions and P&L data
+async function loadStrategyMetrics() {
+    const strategies = {{ strategies_json|tojson }};
+
+    for (const strategy of strategies.slice(0, 5)) {
+        try {
+            // Load positions for position count
+            const posResponse = await fetch(`/strategy/${strategy.id}/positions`);
+            const posData = await posResponse.json();
+
+            let positionCount = 0;
+
+            if (posData.status === 'success' && posData.data) {
+                const positions = posData.data || [];
+
+                // Count only OPEN positions (exclude closed positions with qty=0)
+                positionCount = positions.filter(pos => {
+                    if (pos.is_closed === true) {
+                        return false;
+                    }
+                    const qty = parseInt(pos.quantity) || 0;
+                    return qty !== 0;
+                }).length;
+
+                const posElement = document.getElementById(`positions-${strategy.id}`);
+                if (posElement) {
+                    posElement.textContent = positionCount;
+                    if (positionCount > 0) {
+                        posElement.classList.add('badge-warning');
+                        const closeBtn = document.getElementById(`close-btn-${strategy.id}`);
+                        if (closeBtn) {
+                            closeBtn.style.display = 'inline-flex';
+                        }
+                    } else {
+                        posElement.classList.remove('badge-warning');
+                        const closeBtn = document.getElementById(`close-btn-${strategy.id}`);
+                        if (closeBtn) {
+                            closeBtn.style.display = 'none';
+                        }
+                    }
+                }
+            }
+
+            const totalPnl = strategy.total_pnl || 0;
+
+            const pnlElement = document.getElementById(`pnl-${strategy.id}`);
+            if (pnlElement) {
+                pnlElement.textContent = `₹${totalPnl.toFixed(2)}`;
+                pnlElement.className = totalPnl >= 0 ? 'font-semibold text-success' : 'font-semibold text-error';
+            }
+        } catch (error) {
+            console.error(`Error loading metrics for strategy ${strategy.id}:`, error);
+        }
+    }
+}
+
+// Close positions for a strategy - Show modal
+function closePositions(strategyId) {
+    currentStrategyId = strategyId;
+    close_positions_modal.showModal();
+}
+
+// Confirm Close Positions - Actually close after modal confirmation
+async function confirmClosePositions() {
+    if (!currentStrategyId) return;
+
+    close_positions_modal.close();
+
+    try {
+        const response = await fetch(`/strategy/${currentStrategyId}/close-all`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            showNotification(data.message + ` Total P&L: ₹${data.total_pnl.toFixed(2)}`, 'success');
+            loadStrategyMetrics();
+        } else {
+            showNotification(data.message || 'Failed to close positions', 'error');
+        }
+    } catch (error) {
+        console.error('Error closing positions:', error);
+        showNotification('Error closing positions', 'error');
+    }
+
+    currentStrategyId = null;
+}
+
+// Load account funds data
+async function loadAccountFunds() {
+    const accounts = {{ accounts_json|tojson }};
+
+    for (const account of accounts) {
+        try {
+            const response = await fetch(`/api/accounts/${account.id}/funds`);
+            const data = await response.json();
+
+            if (data.status === 'success' && data.data) {
+                const funds = data.data;
+
+                const availableEl = document.getElementById(`available-${account.id}`);
+                if (availableEl) {
+                    const available = parseFloat(funds.availablecash) || 0;
+                    availableEl.textContent = `₹${available.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                }
+
+                const marginEl = document.getElementById(`margin-${account.id}`);
+                if (marginEl) {
+                    const margin = parseFloat(funds.utiliseddebits || funds.used_margin) || 0;
+                    marginEl.textContent = `₹${margin.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                }
+            } else {
+                const availableEl = document.getElementById(`available-${account.id}`);
+                const marginEl = document.getElementById(`margin-${account.id}`);
+
+                if (availableEl) availableEl.textContent = '₹0.00';
+                if (marginEl) marginEl.textContent = '₹0.00';
+            }
+        } catch (error) {
+            console.error(`Error loading funds for account ${account.id}:`, error);
+
+            const availableEl = document.getElementById(`available-${account.id}`);
+            const marginEl = document.getElementById(`margin-${account.id}`);
+
+            if (availableEl) availableEl.textContent = 'Error';
+            if (marginEl) marginEl.textContent = 'Error';
+        }
+    }
+}
+
+// Load account P&L data (realized + unrealized)
+async function loadAccountPnL() {
+    const accounts = {{ accounts_json|tojson }};
+
+    for (const account of accounts) {
+        try {
+            const response = await fetch(`/api/accounts/${account.id}/pnl`);
+            const data = await response.json();
+
+            if (data.status === 'success' && data.data) {
+                const pnlData = data.data;
+                const totalPnl = parseFloat(pnlData.total_pnl) || 0;
+
+                const pnlEl = document.getElementById(`pnl-account-${account.id}`);
+                if (pnlEl) {
+                    const sign = totalPnl >= 0 ? '+' : '';
+                    const colorClass = totalPnl >= 0 ? 'text-success' : 'text-error';
+                    pnlEl.textContent = `${sign}₹${totalPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                    pnlEl.className = `font-bold ${colorClass}`;
+                }
+
+                const activeStratEl = document.getElementById(`active-strat-${account.id}`);
+                if (activeStratEl && pnlData.open_positions) {
+                    activeStratEl.textContent = `${pnlData.open_positions} open position${pnlData.open_positions !== 1 ? 's' : ''}`;
+                    activeStratEl.classList.remove('text-base-content/50');
+                    activeStratEl.classList.add('text-warning', 'font-semibold');
+                }
+            } else {
+                const pnlEl = document.getElementById(`pnl-account-${account.id}`);
+                if (pnlEl) {
+                    pnlEl.textContent = '₹0.00';
+                    pnlEl.className = 'font-bold text-base-content/60';
+                }
+            }
+        } catch (error) {
+            console.error(`Error loading P&L for account ${account.id}:`, error);
+
+            const pnlEl = document.getElementById(`pnl-account-${account.id}`);
+            if (pnlEl) {
+                pnlEl.textContent = 'Error';
+                pnlEl.className = 'font-bold text-error';
+            }
+        }
+    }
+}
+
+// Check trading hours status
+async function checkTradingHours() {
+    try {
+        const response = await fetch('/api/trading-hours/status');
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            const wasTradingHours = isTradingHours;
+            const isFirstLoad = isTradingHours === null;
+            isTradingHours = data.data.is_trading_hours;
+
+            if (wasTradingHours !== isTradingHours && !isFirstLoad) {
+                if (isTradingHours) {
+                    console.log('📈 Market opened - Starting real-time updates');
+                    startPolling();
+                } else {
+                    console.log('📉 Market closed - Stopping real-time updates');
+                    stopPolling();
+                }
+            }
+
+            if (isFirstLoad) {
+                console.log(isTradingHours ? '📈 Market is open - Starting real-time updates' : '📉 Market is closed - Loading cached data');
+                if (isTradingHours) {
+                    startPolling();
+                } else {
+                    loadStrategyMetrics();
+                    loadAccountFunds();
+                    loadAccountPnL();
+                }
+            }
+
+            updateMarketStatusIndicator(data.data);
+        }
+    } catch (error) {
+        console.error('Error checking trading hours:', error);
+        if (!isTradingHours) {
+            isTradingHours = true;
+            startPolling();
+        }
+    }
+}
+
+// Start polling intervals
+function startPolling() {
+    stopPolling();
+
+    loadStrategyMetrics();
+    loadAccountFunds();
+    loadAccountPnL();
+
+    pollingIntervals.metrics = setInterval(loadStrategyMetrics, 10000);  // 10 seconds
+    pollingIntervals.funds = setInterval(loadAccountFunds, 30000);       // 30 seconds
+    pollingIntervals.pnl = setInterval(loadAccountPnL, 5000);            // 5 seconds
+}
+
+// Stop polling intervals
+function stopPolling() {
+    if (pollingIntervals.metrics) {
+        clearInterval(pollingIntervals.metrics);
+        pollingIntervals.metrics = null;
+    }
+    if (pollingIntervals.funds) {
+        clearInterval(pollingIntervals.funds);
+        pollingIntervals.funds = null;
+    }
+    if (pollingIntervals.pnl) {
+        clearInterval(pollingIntervals.pnl);
+        pollingIntervals.pnl = null;
+    }
+}
+
+// Update market status indicator
+function updateMarketStatusIndicator(tradingData) {
+    const badge = document.getElementById('marketStatusBadge');
+
+    if (!badge) return;
+
+    badge.style.display = 'inline-flex';
+
+    if (tradingData.is_trading_hours) {
+        badge.className = 'badge badge-lg badge-success gap-2';
+        badge.innerHTML = `
+            <svg class="w-3 h-3 fill-current" viewBox="0 0 12 12">
+                <circle cx="6" cy="6" r="6" class="animate-pulse"/>
+            </svg>
+            <span>Market Open - Live Updates</span>
+        `;
+    } else {
+        if (tradingData.is_holiday) {
+            badge.className = 'badge badge-lg badge-error gap-2';
+            badge.innerHTML = `
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                <span>Market Holiday</span>
+            `;
+        } else {
+            badge.className = 'badge badge-lg badge-warning gap-2';
+            const nextSessionText = tradingData.next_session
+                ? ` - Next: ${tradingData.next_session.day} ${tradingData.next_session.start_time}`
+                : '';
+            badge.innerHTML = `
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" opacity="0.3"/>
+                </svg>
+                <span>Market Closed${nextSessionText}</span>
+            `;
+        }
+    }
+}
+
+// Check for expired executions - Full implementation
+async function checkExpiredExecutions() {
+    try {
+        const response = await fetch('/strategy/cleanup-expired', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'info' && data.total_expired > 0) {
+            let content = `
+                <div class="alert alert-warning mb-4">
+                    <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    <div>
+                        <h4 class="font-bold">Found ${data.total_expired} expired execution(s)</h4>
+                        <div class="text-sm">Across ${Object.keys(data.strategies_affected).length} strategy(ies)</div>
+                    </div>
+                </div><div class="space-y-4">
+            `;
+
+            for (const [strategyId, strategyData] of Object.entries(data.strategies_affected)) {
+                content += `
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold text-base flex items-center gap-2">
+                                📋 ${strategyData.name}
+                                <span class="badge badge-warning badge-sm">${strategyData.count} expired</span>
+                            </h4>
+                            <div class="space-y-1 mt-2">
+                `;
+
+                strategyData.executions.slice(0, 3).forEach(exec => {
+                    content += `
+                        <div class="text-sm flex justify-between items-center bg-base-100 p-2 rounded">
+                            <span class="font-mono text-xs">${exec.symbol}</span>
+                            <span class="badge badge-outline badge-xs">${exec.days_old} days old</span>
+                        </div>
+                    `;
+                });
+
+                if (strategyData.executions.length > 3) {
+                    content += `
+                        <div class="text-sm text-base-content/60 p-2">
+                            ... and ${strategyData.executions.length - 3} more positions
+                        </div>
+                    `;
+                }
+
+                content += `
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            content += `
+                </div>
+                <div class="alert alert-info mt-4">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div class="text-sm">
+                        <strong>How to clean up:</strong> Click "Delete" on each strategy above. You'll be prompted to force delete with full details.
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('expiredExecutionsContent').innerHTML = content;
+            document.getElementById('expiredExecutionsModal').showModal();
+        } else if (data.total_expired === 0) {
+            document.getElementById('noExpiredModal').showModal();
+        } else {
+            showNotification(data.message, data.status);
+        }
+    } catch (error) {
+        console.error('Error checking expired executions:', error);
+        showNotification('Error checking expired executions', 'error');
+    }
+}
+
+// Delete Strategy with force option
+function deleteStrategy(strategyId, forceDelete = false) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]');
+    if (!csrfToken) {
+        showNotification('CSRF token not found. Please refresh the page.', 'error');
+        return;
+    }
+
+    fetch(`/strategy/delete/${strategyId}${forceDelete ? '?force=true' : ''}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken.content
+        }
+    })
+    .then(response => {
+        if (response.status === 409) {
+            return response.json().then(data => {
+                let content = `
+                    <div class="alert alert-error mb-4">
+                        <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        </svg>
+                        <div>
+                            <h4 class="font-bold">This strategy has ${data.active_positions} OPEN POSITION(S)</h4>
+                            <div class="text-sm">Total executions: ${data.total_executions}</div>
+                        </div>
+                    </div>
+                    <div class="card bg-base-200 mb-4">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold mb-3">Active Positions:</h4>
+                            <div class="space-y-2">
+                `;
+
+                data.execution_details.forEach(exec => {
+                    const pnlColor = exec.unrealized_pnl >= 0 ? 'text-success' : 'text-error';
+                    content += `
+                        <div class="bg-base-100 p-3 rounded-lg">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="font-mono text-sm font-semibold">${exec.symbol}</div>
+                                    <div class="text-xs text-base-content/60 mt-1">Account: ${exec.account}</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-sm">Qty: ${exec.quantity}</div>
+                                    <div class="text-xs text-base-content/60">Entry: ₹${exec.entry_price}</div>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-2 border-t border-base-300">
+                                <div class="flex justify-between text-sm">
+                                    <span>Unrealized P&L:</span>
+                                    <span class="font-semibold ${pnlColor}">₹${exec.unrealized_pnl.toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                content += `
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning mb-4">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div class="text-sm">${data.warning_message}</div>
+                    </div>
+                    <div class="bg-base-200 p-4 rounded-lg">
+                        <h4 class="font-semibold text-sm mb-2">This is useful for:</h4>
+                        <ul class="space-y-1 text-sm">
+                            <li class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                Expired contracts that can't be closed
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                Manually closed positions (outside AlgoMirror)
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                Testing strategies with old data
+                            </li>
+                        </ul>
+                    </div>
+                `;
+
+                document.getElementById('forceDeleteContent').innerHTML = content;
+
+                const confirmBtn = document.getElementById('confirmForceDeleteBtn');
+                confirmBtn.onclick = () => {
+                    document.getElementById('forceDeleteModal').close();
+                    deleteStrategy(strategyId, true);
+                };
+
+                document.getElementById('forceDeleteModal').showModal();
+                return null;
+            });
+        }
+
+        if (!response.ok) {
+            return response.json().then(data => {
+                showNotification(data.message || `Error: ${response.status} ${response.statusText}`, 'error');
+                return null;
+            }).catch(err => {
+                showNotification(`Error: ${response.status} ${response.statusText}`, 'error');
+                return null;
+            });
+        }
+
+        return response.json();
+    })
+    .then(data => {
+        if (!data) return;
+
+        if (data.status === 'success') {
+            if (data.force_deleted) {
+                showNotification(`✓ Force deleted: ${data.message}`, 'success');
+            } else {
+                showNotification('Strategy deleted successfully', 'success');
+            }
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showNotification(data.message || 'Failed to delete strategy', 'error');
+        }
+    })
+    .catch(error => {
+        showNotification('Error deleting strategy', 'error');
+        console.error('Error:', error);
+    });
+}
+
+// Show notification
+function showNotification(message, type) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-end`;
+
+    let alertClass = 'alert-info';
+    if (type === 'success') alertClass = 'alert-success';
+    else if (type === 'error') alertClass = 'alert-error';
+    else if (type === 'warning') alertClass = 'alert-warning';
+
+    toast.innerHTML = `
+        <div class="alert ${alertClass}">
+            <span>${message}</span>
+        </div>
+    `;
+    document.body.appendChild(toast);
+    const duration = type === 'info' ? 2000 : 5000;
+    setTimeout(() => toast.remove(), duration);
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkTradingHours();
+    pollingIntervals.tradingHoursCheck = setInterval(checkTradingHours, 60000);
+});
 </script>
-
-<!-- Include ping monitoring script -->
-<script src="{{ url_for('static', filename='js/ping_monitor.js') }}"></script>
 {% endblock %}
