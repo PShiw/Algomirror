@@ -2,6 +2,12 @@
 
 {% block title %}Strategy Builder - AlgoMirror{% endblock %}
 
+{% block head %}
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+{% endblock %}
+
 {% block content %}
 <style>
 /* Frozen leg styling */
@@ -44,7 +50,7 @@
         </a>
     </div>
 
-    <form id="strategyForm">
+    <form id="strategyForm" onsubmit="return false;">
         <!-- Basic Information Card -->
         <div class="card bg-base-100 shadow-lg mb-6">
             <div class="card-body">
@@ -224,6 +230,30 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-wrap justify-end gap-3 mt-4">
+                    {% if strategy %}
+                    <a href="{{ url_for('tradingview.strategy_monitor', strategy_id=strategy.id) }}" class="btn btn-info btn-sm" target="_blank">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        Spread Monitor
+                    </a>
+                    {% endif %}
+                    <button type="button" onclick="saveStrategy(false)" class="btn btn-primary btn-outline btn-sm">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                        </svg>
+                        Save Strategy
+                    </button>
+                    <button type="button" onclick="saveStrategy(true)" class="btn btn-primary btn-sm">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        Save & Execute
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -254,26 +284,27 @@
                 <!-- Tabs -->
                 <div class="border-b border-base-300 mb-4">
                     <div class="flex space-x-2">
-                        <button type="button" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary" id="tab-orderbook" onclick="showStrategyTab('orderbook', this)">
+                        <button type="button" class="px-6 py-3 font-semibold border-b-2 border-transparent text-base-content/60 hover:text-base-content hover:border-base-300" id="tab-orderbook" onclick="showStrategyTab('orderbook', this)">
                             Orderbook
                         </button>
                         <button type="button" class="px-6 py-3 font-semibold border-b-2 border-transparent text-base-content/60 hover:text-base-content hover:border-base-300" id="tab-tradebook" onclick="showStrategyTab('tradebook', this)">
                             Tradebook
                         </button>
-                        <button type="button" class="px-6 py-3 font-semibold border-b-2 border-transparent text-base-content/60 hover:text-base-content hover:border-base-300" id="tab-positions" onclick="showStrategyTab('positions', this)">
+                        <button type="button" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary" id="tab-positions" onclick="showStrategyTab('positions', this)">
                             Positions
                         </button>
                     </div>
                 </div>
 
                 <!-- Orderbook Tab -->
-                <div id="orderbook-tab" class="strategy-tab">
+                <div id="orderbook-tab" class="strategy-tab hidden">
                     <div id="order-stats" class="mb-4"></div>
                     <div class="overflow-x-auto">
                         <table class="table table-compact">
                             <thead>
                                 <tr>
                                     <th>Account</th>
+                                    <th>Leg</th>
                                     <th>Order ID</th>
                                     <th>Symbol</th>
                                     <th>Exchange</th>
@@ -287,7 +318,7 @@
                             </thead>
                             <tbody id="orderbook-body">
                                 <tr>
-                                    <td colspan="10" class="text-center text-base-content/60">Loading...</td>
+                                    <td colspan="11" class="text-center text-base-content/60">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -301,6 +332,7 @@
                             <thead>
                                 <tr>
                                     <th>Account</th>
+                                    <th>Leg</th>
                                     <th>Order ID</th>
                                     <th>Symbol</th>
                                     <th>Exchange</th>
@@ -313,7 +345,7 @@
                             </thead>
                             <tbody id="tradebook-body">
                                 <tr>
-                                    <td colspan="9" class="text-center text-base-content/60">Loading...</td>
+                                    <td colspan="10" class="text-center text-base-content/60">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -343,12 +375,13 @@
                 </div>
 
                 <!-- Positions Tab -->
-                <div id="positions-tab" class="strategy-tab hidden">
+                <div id="positions-tab" class="strategy-tab">
                     <div class="overflow-x-auto">
                         <table class="table table-compact">
                             <thead>
                                 <tr>
                                     <th>Account</th>
+                                    <th>Leg</th>
                                     <th>Symbol</th>
                                     <th>Exchange</th>
                                     <th>Product</th>
@@ -357,11 +390,12 @@
                                     <th>Avg Price</th>
                                     <th>LTP</th>
                                     <th>P&L</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="positions-body">
                                 <tr>
-                                    <td colspan="9" class="text-center text-base-content/60">Loading...</td>
+                                    <td colspan="11" class="text-center text-base-content/60">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -390,21 +424,6 @@
             </div>
         </div>
         {% endif %}
-
-        <!-- Action Buttons -->
-        <div class="flex justify-end gap-3">
-            {% if strategy %}
-            <a href="{{ url_for('tradingview.strategy_monitor', strategy_id=strategy.id) }}" class="btn btn-info btn-outline" target="_blank">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                </svg>
-                Spread Monitor
-            </a>
-            {% endif %}
-            <button type="button" onclick="saveAsTemplate()" class="btn btn-ghost">Save as Template</button>
-            <button type="button" onclick="saveStrategy(false)" class="btn btn-outline btn-primary">Save Strategy</button>
-            <button type="button" onclick="saveStrategy(true)" class="btn btn-primary">Save & Execute</button>
-        </div>
     </form>
 </div>
 
@@ -417,6 +436,9 @@
                 <span class="leg-status-badge badge badge-sm badge-success ml-2" style="display:none;">EXECUTED</span>
             </h3>
             <div class="flex gap-2">
+                <button type="button" onclick="closeLegAllAccounts(this)" class="btn btn-error btn-sm leg-close-btn" style="display:none;">
+                    Close
+                </button>
                 <button type="button" onclick="modifyLegPrice(this)" class="btn btn-warning btn-sm leg-modify-btn" style="display:none;">
                     Modify Price
                 </button>
@@ -586,6 +608,27 @@
     </form>
 </dialog>
 
+<!-- Close Leg Modal -->
+<dialog id="close_leg_modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg">Close Leg</h3>
+        <p class="py-4">Are you sure you want to close <span class="font-semibold text-primary" id="close_leg_text">Leg 1</span> for ALL accounts?</p>
+        <div class="alert alert-warning mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>This will close all positions for this leg across all selected accounts.</span>
+        </div>
+        <div class="modal-action">
+            <button type="button" class="btn btn-ghost" onclick="close_leg_modal.close()">Cancel</button>
+            <button type="button" class="btn btn-error" onclick="confirmCloseLeg()">Close Leg</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
 <script>
 let legCount = 0;
 let lotSizes = {};  // Store lot sizes fetched from backend
@@ -730,6 +773,12 @@ function freezeLeg(legItem, isExecuted, isPending = false) {
             if (cancelBtn) {
                 cancelBtn.style.display = 'inline-block';
             }
+        } else {
+            // For executed orders, show close button
+            const closeBtn = legItem.querySelector('.leg-close-btn');
+            if (closeBtn) {
+                closeBtn.style.display = 'inline-block';
+            }
         }
 
         // Hide remove button
@@ -761,10 +810,18 @@ function freezeLeg(legItem, isExecuted, isPending = false) {
             badge.classList.remove('badge-success', 'badge-warning');
         }
 
-        // Hide cancel button
+        // Hide cancel and close buttons
         const cancelBtn = legItem.querySelector('.leg-cancel-btn');
+        const closeBtn = legItem.querySelector('.leg-close-btn');
+        const modifyBtn = legItem.querySelector('.leg-modify-btn');
         if (cancelBtn) {
             cancelBtn.style.display = 'none';
+        }
+        if (closeBtn) {
+            closeBtn.style.display = 'none';
+        }
+        if (modifyBtn) {
+            modifyBtn.style.display = 'none';
         }
 
         // Enable all inputs and selects
@@ -1323,8 +1380,7 @@ function saveAsTemplate() {
 
 // Show notification
 function showNotification(message, type) {
-    const toast = document.createElement('div');
-    toast.className = `toast toast-end`;
+    console.log('[showNotification] Called with:', message, type);
 
     // Map type to appropriate alert class
     let alertClass = 'alert-info';
@@ -1336,13 +1392,30 @@ function showNotification(message, type) {
         alertClass = 'alert-warning';
     }
 
-    toast.innerHTML = `
-        <div class="alert ${alertClass}">
-            <span>${message}</span>
-        </div>
+    const alert = document.createElement('div');
+    alert.className = `alert ${alertClass} shadow-lg mb-2`;
+    alert.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <span>${message}</span>
     `;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 5000);  // Show for 5 seconds for important messages
+
+    // Find toast container (from base.html)
+    let container = document.querySelector('.toast');
+    console.log('[showNotification] Toast container found:', container);
+
+    if (!container) {
+        // Create container if it doesn't exist
+        console.log('[showNotification] Creating new toast container');
+        container = document.createElement('div');
+        container.className = 'toast toast-top toast-end z-50';
+        document.body.appendChild(container);
+    }
+
+    container.appendChild(alert);
+    console.log('[showNotification] Alert added to container');
+    setTimeout(() => alert.remove(), 5000);  // Show for 5 seconds for important messages
 }
 
 // Initialize with existing data or add first leg
@@ -1493,12 +1566,13 @@ function loadStrategyData() {
 
 function refreshStrategyData() {
     loadStrategyData();
-    showToast('Data refreshed', 'success');
+    showNotification('Data refreshed', 'success');
 }
 
 async function loadOrderbook(strategyId) {
     try {
-        const response = await fetch(`/strategy/${strategyId}/orderbook`);
+        // Add cache buster to ensure fresh data
+        const response = await fetch(`/strategy/${strategyId}/orderbook?_=${Date.now()}`);
         const data = await response.json();
 
         if (data.status === 'success' && data.data) {
@@ -1509,7 +1583,7 @@ async function loadOrderbook(strategyId) {
             const stats = data.data.statistics || {};
 
             if (orders.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-base-content/60">No orders found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" class="text-center text-base-content/60">No orders found</td></tr>';
             } else {
                 orders.forEach(order => {
                     const row = tbody.insertRow();
@@ -1518,6 +1592,7 @@ async function loadOrderbook(strategyId) {
                                       order.order_status === 'open' ? 'badge-warning' : 'badge-outline';
                     row.innerHTML = `
                         <td><span class="badge badge-outline badge-sm">${order.account_name || 'N/A'}</span></td>
+                        <td><span class="badge badge-primary badge-sm">${order.leg_number || '-'}</span></td>
                         <td class="text-xs">${order.orderid || '-'}</td>
                         <td>${order.symbol}</td>
                         <td>${order.exchange}</td>
@@ -1569,7 +1644,8 @@ async function loadOrderbook(strategyId) {
 
 async function loadTradebook(strategyId) {
     try {
-        const response = await fetch(`/strategy/${strategyId}/tradebook`);
+        // Add cache buster to ensure fresh data
+        const response = await fetch(`/strategy/${strategyId}/tradebook?_=${Date.now()}`);
         const data = await response.json();
 
         if (data.status === 'success' && data.data) {
@@ -1579,12 +1655,13 @@ async function loadTradebook(strategyId) {
             const trades = data.data || [];
 
             if (trades.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-base-content/60">No trades found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-base-content/60">No trades found</td></tr>';
             } else {
                 trades.forEach(trade => {
                     const row = tbody.insertRow();
                     row.innerHTML = `
                         <td><span class="badge badge-outline badge-sm">${trade.account_name || 'N/A'}</span></td>
+                        <td><span class="badge badge-primary badge-sm">${trade.leg_number || '-'}</span></td>
                         <td class="text-xs">${trade.orderid || '-'}</td>
                         <td>${trade.symbol}</td>
                         <td>${trade.exchange}</td>
@@ -1604,7 +1681,8 @@ async function loadTradebook(strategyId) {
 
 async function loadPositions(strategyId) {
     try {
-        const response = await fetch(`/strategy/${strategyId}/positions`);
+        // Add cache buster to ensure fresh data
+        const response = await fetch(`/strategy/${strategyId}/positions?_=${Date.now()}`);
         const data = await response.json();
 
         if (data.status === 'success' && data.data) {
@@ -1612,9 +1690,10 @@ async function loadPositions(strategyId) {
             tbody.innerHTML = '';
 
             const positions = data.data || [];
+            console.log(`Loaded ${positions.length} positions:`, positions);
 
             if (positions.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-base-content/60">No positions</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-base-content/60">No positions</td></tr>';
 
                 // Update open positions count to 0
                 const countElement = document.getElementById('open-positions-count');
@@ -1628,15 +1707,27 @@ async function loadPositions(strategyId) {
                     const pnl = parseFloat(position.pnl) || 0;
                     const row = tbody.insertRow();
                     const qty = parseInt(position.quantity) || 0;
+                    const isOpenPosition = qty !== 0 && position.is_closed !== true;
+
+                    console.log(`Position ${position.symbol}: qty=${qty}, is_closed=${position.is_closed}, status=${position.status}, isOpen=${isOpenPosition}`);
 
                     // Count only open positions (qty != 0 and not closed)
-                    if (qty !== 0 && position.is_closed !== true) {
+                    if (isOpenPosition) {
                         openPositionsCount++;
                     }
 
                     const action = qty < 0 ? 'SELL' : 'BUY';
+                    const closeButtonHtml = isOpenPosition ?
+                        `<button class="btn btn-circle btn-xs btn-error" onclick="closeIndividualPosition('${position.symbol}', '${position.exchange}', '${position.product}', ${position.account_id}, '${position.account_name}')" title="Close position for ${position.account_name}">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>` :
+                        '<span class="badge badge-ghost badge-sm">Closed</span>';
+
                     row.innerHTML = `
                         <td><span class="badge badge-outline badge-sm">${position.account_name || 'N/A'}</span></td>
+                        <td><span class="badge badge-primary badge-sm">${position.leg_number || '-'}</span></td>
                         <td>${position.symbol}</td>
                         <td>${position.exchange}</td>
                         <td>${position.product}</td>
@@ -1645,6 +1736,7 @@ async function loadPositions(strategyId) {
                         <td>₹${position.average_price || 0}</td>
                         <td>₹${position.ltp || 0}</td>
                         <td class="${pnl >= 0 ? 'text-success' : 'text-error'}">₹${pnl.toFixed(2)}</td>
+                        <td>${closeButtonHtml}</td>
                     `;
                 });
 
@@ -1685,16 +1777,160 @@ async function confirmClosePositions() {
         const data = await response.json();
 
         if (data.status === 'success') {
-            showToast(data.message + ` Total P&L: ₹${data.total_pnl.toFixed(2)}`, 'success');
+            showNotification(data.message + ` Total P&L: ₹${data.total_pnl.toFixed(2)}`, 'success');
             // Reload the data
             loadStrategyData();
         } else {
-            showToast(data.message || 'Failed to close positions', 'error');
+            showNotification(data.message || 'Failed to close positions', 'error');
         }
     } catch (error) {
         console.error('Error closing positions:', error);
-        showToast('Error closing positions', 'error');
+        showNotification('Error closing positions', 'error');
     }
+    {% endif %}
+}
+
+// Close individual position
+async function closeIndividualPosition(symbol, exchange, product, accountId, accountName) {
+    {% if strategy %}
+    console.log('[closeIndividualPosition] Called with:', { symbol, exchange, product, accountId, accountName });
+
+    // No confirmation dialog - direct close
+    console.log('[closeIndividualPosition] Proceeding with direct close (no confirmation)');
+
+    try {
+        const strategyId = {{ strategy.id }};
+        console.log('[closeIndividualPosition] Sending API request for strategy:', strategyId);
+
+        const response = await fetch(`/strategy/${strategyId}/close-position`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            },
+            body: JSON.stringify({
+                symbol: symbol,
+                exchange: exchange,
+                product: product,
+                account_id: accountId
+            })
+        });
+
+        console.log('[closeIndividualPosition] Response received, status:', response.status);
+        const data = await response.json();
+
+        console.log('[closeIndividualPosition] API response data:', data);
+
+        if (data.status === 'success') {
+            console.log('[closeIndividualPosition] Success - calling showNotification');
+            showNotification(`${data.message || 'Position closed for ' + symbol}. P&L: ₹${data.pnl ? data.pnl.toFixed(2) : '0.00'}`, 'success');
+            // Immediately reload data
+            console.log('Reloading strategy data...');
+            loadStrategyData();
+            // Force another refresh after 1 second to ensure database updates are visible
+            setTimeout(() => {
+                console.log('Second refresh after position close...');
+                loadStrategyData();
+            }, 1000);
+        } else {
+            console.error('[closeIndividualPosition] Failed:', data);
+            showNotification(data.message || 'Failed to close position', 'error');
+            // Refresh anyway to show current state
+            loadStrategyData();
+        }
+    } catch (error) {
+        console.error('[closeIndividualPosition] Exception:', error);
+        showNotification('Error closing position', 'error');
+    }
+    {% endif %}
+}
+
+// Store current leg number for modal
+let currentCloseLegNumber = null;
+
+// Close leg for all accounts - Show modal
+function closeLegAllAccounts(button) {
+    {% if strategy %}
+    console.log('[closeLegAllAccounts] Button clicked');
+    const legItem = button.closest('.leg-item');
+    const legNumber = legItem.querySelector('.leg-number').textContent;
+    console.log('[closeLegAllAccounts] Leg number:', legNumber);
+
+    // Store leg number for confirmation
+    currentCloseLegNumber = parseInt(legNumber);
+    console.log('[closeLegAllAccounts] Stored leg number:', currentCloseLegNumber);
+
+    // Update modal text
+    const modalText = document.getElementById('close_leg_text');
+    if (modalText) {
+        modalText.textContent = `Leg ${legNumber}`;
+    }
+
+    // Show modal
+    console.log('[closeLegAllAccounts] Showing modal');
+    close_leg_modal.showModal();
+    {% endif %}
+}
+
+// Confirm close leg - Actually close after modal confirmation
+async function confirmCloseLeg() {
+    {% if strategy %}
+    console.log('[confirmCloseLeg] Function called, leg number:', currentCloseLegNumber);
+
+    if (!currentCloseLegNumber) {
+        console.log('[confirmCloseLeg] No leg number stored, returning');
+        return;
+    }
+
+    console.log('[confirmCloseLeg] Closing modal');
+    close_leg_modal.close();
+
+    try {
+        const strategyId = {{ strategy.id }};
+        console.log('[confirmCloseLeg] Sending API request for strategy:', strategyId, 'leg:', currentCloseLegNumber);
+
+        const response = await fetch(`/strategy/${strategyId}/close-leg`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            },
+            body: JSON.stringify({
+                leg_number: currentCloseLegNumber
+            })
+        });
+
+        console.log('[confirmCloseLeg] Response received, status:', response.status);
+        const data = await response.json();
+
+        console.log('[confirmCloseLeg] API response data:', data);
+
+        if (data.status === 'success') {
+            console.log('[confirmCloseLeg] Success - calling showNotification');
+            showNotification(`${data.message}. Total P&L: ₹${data.total_pnl ? data.total_pnl.toFixed(2) : '0.00'}`, 'success');
+            // Immediately reload data
+            console.log('Reloading strategy data after leg close...');
+            loadStrategyData();
+            checkAndFreezePendingLegs();
+            // Force another refresh after 1 second to ensure database updates are visible
+            setTimeout(() => {
+                console.log('Second refresh after leg close...');
+                loadStrategyData();
+                checkAndFreezePendingLegs();
+            }, 1000);
+        } else {
+            console.error('[confirmCloseLeg] Failed:', data);
+            showNotification(data.message || 'Failed to close leg', 'error');
+            // Refresh anyway to show current state
+            loadStrategyData();
+        }
+    } catch (error) {
+        console.error('[confirmCloseLeg] Exception:', error);
+        showNotification('Error closing leg', 'error');
+    }
+
+    console.log('[confirmCloseLeg] Clearing leg number');
+    currentCloseLegNumber = null;
     {% endif %}
 }
 

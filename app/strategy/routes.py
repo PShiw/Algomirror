@@ -938,6 +938,7 @@ def strategy_orderbook(strategy_id):
             orders.append({
                 'account_name': execution.account.account_name if execution.account else 'N/A',
                 'broker_name': execution.account.broker_name if execution.account else 'N/A',
+                'leg_number': execution.leg.leg_number if execution.leg else None,
                 'action': exit_action,
                 'symbol': execution.symbol,
                 'exchange': execution.exchange,
@@ -1009,6 +1010,7 @@ def strategy_tradebook(strategy_id):
         data.append({
             'account_name': trade.account.account_name if trade.account else 'N/A',
             'broker_name': trade.account.broker_name if trade.account else 'N/A',
+            'leg_number': trade.leg.leg_number if trade.leg else None,
             'action': trade.leg.action,
             'symbol': trade.symbol,
             'exchange': trade.exchange,
@@ -1029,6 +1031,7 @@ def strategy_tradebook(strategy_id):
             data.append({
                 'account_name': trade.account.account_name if trade.account else 'N/A',
                 'broker_name': trade.account.broker_name if trade.account else 'N/A',
+                'leg_number': trade.leg.leg_number if trade.leg else None,
                 'action': exit_action,
                 'symbol': trade.symbol,
                 'exchange': trade.exchange,
@@ -1118,7 +1121,9 @@ def strategy_positions(strategy_id):
 
         data.append({
             'account_name': position.account.account_name if position.account else 'N/A',
+            'account_id': position.account_id,  # Add account_id for close button
             'broker_name': position.account.broker_name if position.account else 'N/A',
+            'leg_number': position.leg.leg_number if position.leg else None,
             'symbol': position.symbol,
             'exchange': position.exchange,
             'product': position.leg.product_type.upper() if position.leg.product_type else 'MIS',
@@ -1126,7 +1131,8 @@ def strategy_positions(strategy_id):
             'average_price': str(position.entry_price or 0.0),
             'ltp': str(ltp),
             'pnl': str(round(pnl, 2)),
-            'is_closed': is_closed  # Flag to indicate closed position
+            'is_closed': is_closed,  # Flag to indicate closed position
+            'status': position.status  # Add status for debugging
         })
 
     # Save unrealized P&L to database with error handling for database locks
@@ -1353,6 +1359,463 @@ def close_all_positions(strategy_id):
 
     except Exception as e:
         logger.error(f"Error closing positions for strategy {strategy_id}: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@strategy_bp.route('/<int:strategy_id>/close-position', methods=['POST'])
+@login_required
+@api_rate_limit()
+def close_individual_position(strategy_id):
+    """Close a specific position for a strategy"""
+    try:
+        strategy = Strategy.query.filter_by(
+            id=strategy_id,
+            user_id=current_user.id
+        ).first_or_404()
+
+        data = request.get_json()
+        symbol = data.get('symbol')
+        exchange = data.get('exchange')
+        product = data.get('product')
+        account_id = data.get('account_id')
+
+        if not all([symbol, exchange, product, account_id]):
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing required parameters'
+            }), 400
+
+        # Find the open position in database
+        # Note: product is stored in the leg, not in StrategyExecution
+        position = StrategyExecution.query.filter_by(
+            strategy_id=strategy_id,
+            symbol=symbol,
+            exchange=exchange,
+            account_id=account_id,
+            status='entered'
+        ).first()
+
+        if not position:
+            return jsonify({
+                'status': 'error',
+                'message': 'Position not found or already closed in database'
+            }), 404
+
+        # Check if order was rejected/cancelled
+        if hasattr(position, 'broker_order_status') and position.broker_order_status in ['rejected', 'cancelled']:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot close rejected/cancelled order'
+            }), 400
+
+        # Get account details first for API access
+        account = TradingAccount.query.get(account_id)
+        if not account or account.user_id != current_user.id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Account not found'
+            }), 404
+
+        # Verify position exists at broker level before attempting to close
+        from app.utils.openalgo_client import ExtendedOpenAlgoAPI
+
+        client = ExtendedOpenAlgoAPI(
+            api_key=account.get_api_key(),
+            host=account.host_url
+        )
+
+        # Get the actual product from the position's leg
+        position_product = position.leg.product_type.upper() if position.leg.product_type else 'MIS'
+
+        try:
+            # Get broker's position book
+            positionbook_response = client.positionbook()
+
+            if positionbook_response.get('status') != 'success':
+                logger.warning(f"Could not fetch positionbook from broker: {positionbook_response.get('message')}")
+                # Continue anyway as position might exist
+            else:
+                # Check if position exists in broker's positionbook
+                broker_positions = positionbook_response.get('data', [])
+                position_exists = False
+                actual_quantity = 0
+
+                for broker_pos in broker_positions:
+                    if (broker_pos.get('symbol') == symbol and
+                        broker_pos.get('exchange') == exchange and
+                        broker_pos.get('product') == position_product):
+                        qty = int(broker_pos.get('quantity', 0))
+                        if qty != 0:
+                            position_exists = True
+                            actual_quantity = qty
+                            break
+
+                if not position_exists:
+                    # Position doesn't exist at broker - mark as closed in our database
+                    position.status = 'exited'
+                    position.exit_time = datetime.utcnow()
+                    position.is_closed = True
+
+                    # Get current LTP for P&L calculation if we don't have exit_price
+                    if not position.exit_price:
+                        try:
+                            quote = client.quotes(symbol=symbol, exchange=exchange)
+                            ltp = float(quote.get('data', {}).get('ltp', position.entry_price))
+                            position.exit_price = ltp
+                        except:
+                            position.exit_price = position.entry_price
+
+                    # Calculate final P&L
+                    if position.leg.action == 'BUY':
+                        pnl = (position.exit_price - position.entry_price) * position.quantity if position.entry_price else 0
+                    else:
+                        pnl = (position.entry_price - position.exit_price) * position.quantity if position.entry_price else 0
+
+                    position.realized_pnl = pnl
+                    db.session.commit()
+
+                    logger.info(f"Position already closed at broker. Database updated. Entry: ₹{position.entry_price}, Exit: ₹{position.exit_price}, P&L: ₹{pnl:.2f}")
+
+                    return jsonify({
+                        'status': 'success',
+                        'message': f'Position already closed at broker',
+                        'pnl': pnl,
+                        'orderid': position.order_id
+                    })
+
+                # Update quantity if different
+                if abs(actual_quantity) != position.quantity:
+                    logger.warning(f"Quantity mismatch: DB={position.quantity}, Broker={abs(actual_quantity)}")
+                    position.quantity = abs(actual_quantity)
+                    db.session.commit()
+
+        except Exception as e:
+            logger.warning(f"Error verifying position at broker: {e}")
+            # Continue with close attempt anyway
+
+        from app.utils.freeze_quantity_handler import place_order_with_freeze_check
+
+        # Reverse action for closing
+        close_action = 'SELL' if position.leg.action == 'BUY' else 'BUY'
+
+        logger.info(f"Closing individual position: {close_action} {position.quantity} {symbol} on {exchange}")
+
+        # Place close order with freeze-aware placement
+        response = place_order_with_freeze_check(
+            client=client,
+            user_id=current_user.id,
+            strategy=strategy.name,
+            symbol=symbol,
+            exchange=exchange,
+            action=close_action,
+            quantity=position.quantity,
+            price_type='MARKET',
+            product=position_product
+        )
+
+        if response and response.get('status') == 'success':
+            # Update position status
+            position.status = 'exited'
+            position.exit_price = position.ltp if hasattr(position, 'ltp') else position.entry_price
+            position.exit_time = datetime.utcnow()
+            position.is_closed = True
+
+            # Store exit order ID from broker response
+            if response.get('orderid'):
+                position.exit_order_id = response.get('orderid')
+
+            # Calculate P&L
+            if position.leg.action == 'BUY':
+                pnl = (position.exit_price - position.entry_price) * position.quantity
+            else:
+                pnl = (position.entry_price - position.exit_price) * position.quantity
+
+            position.realized_pnl = pnl
+
+            db.session.commit()
+
+            logger.info(f"Position closed successfully: {symbol}, P&L: ₹{pnl:.2f}")
+
+            return jsonify({
+                'status': 'success',
+                'message': f'Position closed for {symbol}',
+                'pnl': pnl,
+                'orderid': response.get('orderid')
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': response.get('message', 'Failed to place close order')
+            }), 400
+
+    except Exception as e:
+        logger.error(f"Error closing individual position: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@strategy_bp.route('/<int:strategy_id>/close-leg', methods=['POST'])
+@login_required
+@api_rate_limit()
+def close_leg_all_accounts(strategy_id):
+    """Close a specific leg across all accounts"""
+    import threading
+
+    try:
+        strategy = Strategy.query.filter_by(
+            id=strategy_id,
+            user_id=current_user.id
+        ).first_or_404()
+
+        data = request.get_json()
+        leg_number = data.get('leg_number')
+
+        if not leg_number:
+            return jsonify({
+                'status': 'error',
+                'message': 'Leg number is required'
+            }), 400
+
+        # Find the leg
+        leg = StrategyLeg.query.filter_by(
+            strategy_id=strategy_id,
+            leg_number=leg_number
+        ).first()
+
+        if not leg:
+            return jsonify({
+                'status': 'error',
+                'message': f'Leg {leg_number} not found'
+            }), 404
+
+        # Get all open positions for this leg
+        open_positions = StrategyExecution.query.filter_by(
+            strategy_id=strategy_id,
+            leg_id=leg.id,
+            status='entered'
+        ).all()
+
+        # Filter out rejected/cancelled orders
+        open_positions = [
+            pos for pos in open_positions
+            if not (hasattr(pos, 'broker_order_status') and pos.broker_order_status in ['rejected', 'cancelled'])
+        ]
+
+        if not open_positions:
+            return jsonify({
+                'status': 'error',
+                'message': f'No open positions found for Leg {leg_number}'
+            }), 400
+
+        from app.utils.openalgo_client import ExtendedOpenAlgoAPI
+        from app import create_app
+
+        # Thread-safe results collection
+        results = []
+        results_lock = threading.Lock()
+
+        def close_leg_position_worker(position, strategy_name, product_type, thread_index, user_id):
+            """Worker function to close a leg position in parallel"""
+            import time
+
+            # Add staggered delay to prevent race condition
+            delay = thread_index * 0.3
+            if delay > 0:
+                time.sleep(delay)
+                logger.info(f"[THREAD {thread_index}] Waited {delay:.2f}s to prevent race condition")
+
+            # Create Flask app context for this thread
+            app = create_app()
+
+            with app.app_context():
+                try:
+                    logger.info(f"[THREAD] Closing leg position: {position.symbol} on account {position.account.account_name}, leg {position.leg.leg_number}")
+
+                    # Create API client
+                    client = ExtendedOpenAlgoAPI(
+                        api_key=position.account.get_api_key(),
+                        host=position.account.host_url
+                    )
+
+                    # Get the actual product from the position's leg
+                    position_product = position.leg.product_type.upper() if position.leg.product_type else 'MIS'
+
+                    # Verify position exists at broker level before attempting to close
+                    try:
+                        positionbook_response = client.positionbook()
+
+                        if positionbook_response.get('status') == 'success':
+                            broker_positions = positionbook_response.get('data', [])
+                            position_exists = False
+                            actual_quantity = 0
+
+                            for broker_pos in broker_positions:
+                                if (broker_pos.get('symbol') == position.symbol and
+                                    broker_pos.get('exchange') == position.exchange and
+                                    broker_pos.get('product') == position_product):
+                                    qty = int(broker_pos.get('quantity', 0))
+                                    if qty != 0:
+                                        position_exists = True
+                                        actual_quantity = qty
+                                        break
+
+                            if not position_exists:
+                                # Position doesn't exist at broker - mark as closed
+                                logger.warning(f"[THREAD] Position {position.symbol} not found at broker (already closed). Updating database.")
+                                position.status = 'exited'
+                                position.exit_time = datetime.utcnow()
+                                position.is_closed = True
+
+                                # Get current LTP for P&L calculation if we don't have exit_price
+                                if not position.exit_price:
+                                    try:
+                                        quote = client.quotes(symbol=position.symbol, exchange=position.exchange)
+                                        ltp = float(quote.get('data', {}).get('ltp', position.entry_price))
+                                        position.exit_price = ltp
+                                    except:
+                                        position.exit_price = position.entry_price
+
+                                # Calculate final P&L
+                                if position.leg.action == 'BUY':
+                                    pnl = (position.exit_price - position.entry_price) * position.quantity if position.entry_price else 0
+                                else:
+                                    pnl = (position.entry_price - position.exit_price) * position.quantity if position.entry_price else 0
+
+                                position.realized_pnl = pnl
+                                db.session.commit()
+
+                                logger.info(f"[THREAD] Position already closed at broker. Entry: ₹{position.entry_price}, Exit: ₹{position.exit_price}, P&L: ₹{pnl:.2f}")
+
+                                with results_lock:
+                                    results.append({
+                                        'status': 'success',
+                                        'symbol': position.symbol,
+                                        'account': position.account.account_name,
+                                        'pnl': pnl,
+                                        'orderid': position.order_id,
+                                        'note': 'Already closed at broker'
+                                    })
+                                return
+
+                            # Update quantity if different
+                            if abs(actual_quantity) != position.quantity:
+                                logger.warning(f"[THREAD] Quantity mismatch: DB={position.quantity}, Broker={abs(actual_quantity)}")
+                                position.quantity = abs(actual_quantity)
+                                db.session.commit()
+
+                    except Exception as e:
+                        logger.warning(f"[THREAD] Error verifying position at broker: {e}. Continuing with close attempt.")
+
+                    # Reverse action for closing
+                    close_action = 'SELL' if position.leg.action == 'BUY' else 'BUY'
+
+                    logger.info(f"[THREAD] Placing close order: {close_action} {position.quantity} {position.symbol} on {position.exchange}")
+
+                    # Place close order with freeze-aware placement
+                    from app.utils.freeze_quantity_handler import place_order_with_freeze_check
+
+                    response = place_order_with_freeze_check(
+                        client=client,
+                        user_id=user_id,
+                        strategy=strategy_name,
+                        symbol=position.symbol,
+                        exchange=position.exchange,
+                        action=close_action,
+                        quantity=position.quantity,
+                        price_type='MARKET',
+                        product=position_product
+                    )
+
+                    if response and response.get('status') == 'success':
+                        # Update position status
+                        position.status = 'exited'
+                        position.exit_price = position.ltp if hasattr(position, 'ltp') else position.entry_price
+                        position.exit_time = datetime.utcnow()
+                        position.is_closed = True
+
+                        # Store exit order ID from broker response
+                        if response.get('orderid'):
+                            position.exit_order_id = response.get('orderid')
+
+                        # Calculate P&L
+                        if position.leg.action == 'BUY':
+                            pnl = (position.exit_price - position.entry_price) * position.quantity
+                        else:
+                            pnl = (position.entry_price - position.exit_price) * position.quantity
+
+                        position.realized_pnl = pnl
+
+                        db.session.commit()
+
+                        with results_lock:
+                            results.append({
+                                'status': 'success',
+                                'symbol': position.symbol,
+                                'account': position.account.account_name,
+                                'pnl': pnl,
+                                'orderid': response.get('orderid')
+                            })
+
+                        logger.info(f"[THREAD] Successfully closed leg position: {position.symbol}, P&L: ₹{pnl:.2f}")
+                    else:
+                        error_msg = response.get('message', 'Failed to place close order') if response else 'No response from broker'
+                        with results_lock:
+                            results.append({
+                                'status': 'failed',
+                                'symbol': position.symbol,
+                                'account': position.account.account_name,
+                                'error': error_msg
+                            })
+                        logger.error(f"[THREAD] Failed to close leg position: {position.symbol}, Error: {error_msg}")
+
+                except Exception as e:
+                    with results_lock:
+                        results.append({
+                            'status': 'error',
+                            'symbol': position.symbol,
+                            'account': position.account.account_name,
+                            'error': str(e)
+                        })
+                    logger.error(f"[THREAD] Error closing leg position: {e}", exc_info=True)
+
+        # Create and start threads for parallel execution
+        threads = []
+        logger.info(f"[PARALLEL LEG CLOSE] Starting parallel close for leg {leg_number} ({len(open_positions)} positions)")
+
+        for idx, position in enumerate(open_positions):
+            thread = threading.Thread(
+                target=close_leg_position_worker,
+                args=(position, strategy.name, strategy.product_order_type, idx, strategy.user_id),
+                name=f"CloseLeg{leg_number}_{position.symbol}_{position.account.account_name}"
+            )
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join(timeout=30)
+
+        logger.info(f"[PARALLEL LEG CLOSE] All threads completed. Results: {len(results)}")
+
+        # Calculate summary
+        total_pnl = sum(r.get('pnl', 0) for r in results if r.get('status') == 'success')
+        successful = len([r for r in results if r.get('status') == 'success'])
+        failed = len([r for r in results if r.get('status') in ['failed', 'error']])
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Closed Leg {leg_number}: {successful}/{len(open_positions)} positions closed successfully',
+            'total_pnl': total_pnl,
+            'successful': successful,
+            'failed': failed,
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"Error closing leg {leg_number} for strategy {strategy_id}: {e}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': str(e)
