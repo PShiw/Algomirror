@@ -879,6 +879,11 @@ def cleanup_expired_executions():
 @login_required
 def strategy_orderbook(strategy_id):
     """Get strategy-level orderbook (OpenAlgo format)"""
+    # Clear session cache to get fresh data from database
+    # This is crucial after multi-threaded order placements/closes
+    db.session.rollback()  # Abandon any cached state
+    db.session.expire_all()  # Force reload of all objects
+
     strategy = Strategy.query.filter_by(
         id=strategy_id,
         user_id=current_user.id
@@ -973,6 +978,11 @@ def strategy_orderbook(strategy_id):
 @login_required
 def strategy_tradebook(strategy_id):
     """Get strategy-level tradebook (OpenAlgo format)"""
+    # Clear session cache to get fresh data from database
+    # This is crucial after multi-threaded order placements/closes
+    db.session.rollback()  # Abandon any cached state
+    db.session.expire_all()  # Force reload of all objects
+
     strategy = Strategy.query.filter_by(
         id=strategy_id,
         user_id=current_user.id
@@ -1052,6 +1062,11 @@ def strategy_tradebook(strategy_id):
 @login_required
 def strategy_positions(strategy_id):
     """Get strategy-level positions including closed positions with qty=0 (OpenAlgo format)"""
+    # Clear session cache to get fresh data from database
+    # This is crucial after multi-threaded position closes
+    db.session.rollback()  # Abandon any cached state
+    db.session.expire_all()  # Force reload of all objects
+
     strategy = Strategy.query.filter_by(
         id=strategy_id,
         user_id=current_user.id
@@ -1063,6 +1078,10 @@ def strategy_positions(strategy_id):
         StrategyExecution.strategy_id == strategy_id,
         StrategyExecution.status.in_(['entered', 'exited'])
     ).join(TradingAccount).join(StrategyLeg).all()
+
+    logger.info(f"[POSITIONS DEBUG] Found {len(positions)} positions for strategy {strategy_id}")
+    for pos in positions:
+        logger.info(f"[POSITIONS DEBUG] Position ID {pos.id}: symbol={pos.symbol}, status={pos.status}, qty={pos.quantity}, leg={pos.leg.leg_number if pos.leg else None}")
 
     from app.utils.openalgo_client import ExtendedOpenAlgoAPI
 
@@ -1456,7 +1475,6 @@ def close_individual_position(strategy_id):
                     # Position doesn't exist at broker - mark as closed in our database
                     position.status = 'exited'
                     position.exit_time = datetime.utcnow()
-                    position.is_closed = True
 
                     # Get current LTP for P&L calculation if we don't have exit_price
                     if not position.exit_price:
@@ -1667,7 +1685,6 @@ def close_leg_all_accounts(strategy_id):
                                 logger.warning(f"[THREAD] Position {position.symbol} not found at broker (already closed). Updating database.")
                                 position.status = 'exited'
                                 position.exit_time = datetime.utcnow()
-                                position.is_closed = True
 
                                 # Get current LTP for P&L calculation if we don't have exit_price
                                 if not position.exit_price:
@@ -1734,7 +1751,6 @@ def close_leg_all_accounts(strategy_id):
                         position.status = 'exited'
                         position.exit_price = position.ltp if hasattr(position, 'ltp') else position.entry_price
                         position.exit_time = datetime.utcnow()
-                        position.is_closed = True
 
                         # Store exit order ID from broker response
                         if response.get('orderid'):
