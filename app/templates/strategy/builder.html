@@ -1876,22 +1876,35 @@ async function loadPositions(strategyId) {
                         openPositionsCount++;
                     }
 
-                    // Determine Risk Management Type
-                    let riskMgmtType = 'No';
-                    let riskMgmtBadgeClass = 'badge-ghost';
+                    // Determine Risk Management Type(s) - can have multiple
+                    let riskTypes = [];
+
+                    // Check for Basic - leg-level SL/TP
+                    if ((position.stop_loss && parseFloat(position.stop_loss) > 0) ||
+                        (position.take_profit && parseFloat(position.take_profit) > 0)) {
+                        riskTypes.push('Basic');
+                    }
+
+                    // Check for Traditional - strategy-level risk management
+                    if ((position.max_loss && parseFloat(position.max_loss) > 0) ||
+                        (position.max_profit && parseFloat(position.max_profit) > 0) ||
+                        (position.trailing_sl && parseFloat(position.trailing_sl) > 0)) {
+                        riskTypes.push('Traditional');
+                    }
 
                     // Check for Supertrend - must be explicitly true
                     if (position.supertrend_exit_enabled === true || position.supertrend_exit_enabled === 'true') {
-                        riskMgmtType = 'Supertrend';
-                        riskMgmtBadgeClass = 'badge-info';
+                        riskTypes.push('Supertrend');
                     }
-                    // Check for Traditional - check both leg-level and strategy-level fields
-                    else if ((position.stop_loss && parseFloat(position.stop_loss) > 0) ||
-                             (position.take_profit && parseFloat(position.take_profit) > 0) ||
-                             (position.max_loss && parseFloat(position.max_loss) > 0) ||
-                             (position.max_profit && parseFloat(position.max_profit) > 0) ||
-                             (position.trailing_sl && parseFloat(position.trailing_sl) > 0)) {
-                        riskMgmtType = 'Traditional';
+
+                    // Combine risk types with comma separator
+                    let riskMgmtType = riskTypes.length > 0 ? riskTypes.join(', ') : 'No';
+
+                    // Badge color: info for Supertrend, warning for others, ghost for No
+                    let riskMgmtBadgeClass = 'badge-ghost';
+                    if (riskTypes.includes('Supertrend')) {
+                        riskMgmtBadgeClass = 'badge-info';
+                    } else if (riskTypes.length > 0) {
                         riskMgmtBadgeClass = 'badge-warning';
                     }
 
