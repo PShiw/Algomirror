@@ -119,10 +119,10 @@ class MarginCalculator:
             trade_type: 'sell_c_p' (Sell C/P), 'sell_c_and_p' (Sell C and P), 'buy', 'futures'
             is_expiry: Override expiry day detection if provided
         """
-        # For option buying, use fixed amount per lot (premium-based)
+        # For option buying, no margin is blocked (only premium is paid)
         if trade_type == 'buy':
-            # Default 20,000 per lot for option buying
-            return 20000.0
+            # Option buying doesn't block any margin
+            return 0.0
 
         if is_expiry is None:
             is_expiry = self.is_expiry_day(instrument)
@@ -198,7 +198,24 @@ class MarginCalculator:
             # Get margin requirement per lot
             margin_per_lot = self.get_margin_requirement(instrument, trade_type)
 
-            if margin_per_lot <= 0:
+            # Special case for option buying - no margin blocked
+            if margin_per_lot == 0:
+                details = {
+                    "available_margin": available_margin,
+                    "quality_grade": quality_grade,
+                    "quality_percentage": quality.margin_percentage,
+                    "effective_margin": available_margin * quality_percentage,
+                    "margin_per_lot": 0,
+                    "raw_lot_size": 0,
+                    "final_lot_size": 0,
+                    "margin_required": 0,
+                    "margin_remaining": available_margin,
+                    "calculation": "Option buying doesn't block any margin - lots not limited by margin"
+                }
+                logger.info(f"Option buying for {account.account_name}: No margin blocked")
+                return 0, details
+
+            if margin_per_lot < 0:
                 return 0, {"error": "Invalid margin requirement"}
 
             # Calculate effective available margin
@@ -270,7 +287,23 @@ class MarginCalculator:
             margin_per_lot = self.get_margin_requirement(instrument, trade_type)
             logger.info(f"[LOT CALC DEBUG] Margin per lot: ₹{margin_per_lot:,.2f}")
 
-            if margin_per_lot <= 0:
+            # Special case for option buying - no margin blocked
+            if margin_per_lot == 0:
+                details = {
+                    "available_margin": available_margin,
+                    "margin_percentage": margin_percentage * 100,
+                    "effective_margin": available_margin * margin_percentage,
+                    "margin_per_lot": 0,
+                    "raw_lot_size": 0,
+                    "final_lot_size": 0,
+                    "margin_required": 0,
+                    "margin_remaining": available_margin,
+                    "calculation": "Option buying doesn't block any margin - lots not limited by margin"
+                }
+                logger.info(f"[LOT CALC DEBUG] Option buying for {account.account_name}: No margin blocked")
+                return 0, details
+
+            if margin_per_lot < 0:
                 logger.error(f"[LOT CALC DEBUG] Invalid margin requirement: {margin_per_lot}")
                 return 0, {"error": "Invalid margin requirement"}
 

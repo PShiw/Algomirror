@@ -34,6 +34,7 @@ class StrategyExecutor:
         self.trade_quality = trade_quality
         self.margin_calculator = None
         self.account_margins = {}  # Track available margin per account
+        self.pre_calculated_quantities = {}  # Store pre-calculated quantities for straddles/strangles
 
         # Map strategy risk_profile to margin percentage
         # Fixed lots doesn't use margin calculator, so these only apply to margin-based profiles
@@ -86,6 +87,11 @@ class StrategyExecutor:
 
         logger.info(f"[PARALLEL MODE] Executing strategy {self.strategy.id}: {len(legs)} legs across "
                    f"{len(self.accounts)} accounts in PARALLEL mode")
+
+        # PRE-CALCULATION PHASE: Calculate quantities for straddles/strangles/spreads
+        # This ensures all related legs get the same quantity
+        if self.use_margin_calculator:
+            self._pre_calculate_multi_leg_quantities(legs)
 
         # PHASE 1: Execute all legs in PARALLEL
         results = []
@@ -1000,6 +1006,14 @@ class StrategyExecutor:
         lot_size = self._get_lot_size(leg)
         logger.info(f"[QTY CALC DEBUG] Lot size for {leg.instrument}: {lot_size}")
 
+        # Check for pre-calculated quantity (for straddles, strangles, spreads)
+        if account and self.use_margin_calculator:
+            key = f"{leg.id}_{account.id}"
+            if key in self.pre_calculated_quantities:
+                pre_calc_qty = self.pre_calculated_quantities[key]
+                logger.info(f"[QTY CALC DEBUG] Using pre-calculated quantity for leg {leg.leg_number}: {pre_calc_qty}")
+                return pre_calc_qty
+
         # If margin calculator is enabled and account provided, calculate based on margin
         if self.use_margin_calculator and self.margin_calculator and account:
             logger.info(f"[QTY CALC DEBUG] Using margin calculator for {account.account_name}")
@@ -1007,6 +1021,30 @@ class StrategyExecutor:
             # Determine trade type for margin calculation
             trade_type = self._get_trade_type_for_margin(leg)
             logger.info(f"[QTY CALC DEBUG] Trade type: {trade_type}")
+
+            # Special case for option buying
+            if trade_type == 'buy':
+                # Check if this BUY leg is part of a spread (has corresponding SELL leg)
+                is_part_of_spread = self._is_buy_part_of_spread(leg)
+
+                if is_part_of_spread:
+                    # For spreads, use margin calculation based on SELL leg's margin
+                    # This ensures both BUY and SELL legs have the same quantity
+                    logger.info(f"[QTY CALC DEBUG] Option buying is part of spread - using SELL leg margin calculation")
+                    # Use 'sell_c_p' margin to calculate quantity (same as corresponding SELL leg)
+                    trade_type = 'sell_c_p'
+                else:
+                    # Standalone option buying - no margin blocked, use leg's configured lots
+                    logger.info(f"[QTY CALC DEBUG] Standalone option buying - no margin required, using leg's configured lots")
+                    if leg.lots and leg.lots > 0:
+                        total_quantity = leg.lots * lot_size
+                    elif leg.quantity and leg.quantity > 0:
+                        total_quantity = leg.quantity
+                    else:
+                        total_quantity = lot_size  # Default to 1 lot
+
+                    logger.info(f"[QTY CALC DEBUG] Option buying quantity for {account.account_name}: {total_quantity} (lots={leg.lots}, lot_size={lot_size})")
+                    return total_quantity
 
             # Get available margin for the account
             if account.id not in self.account_margins:
@@ -1099,7 +1137,7 @@ class StrategyExecutor:
             return 'buy'
 
     def _is_spread_strategy(self, current_leg: StrategyLeg) -> bool:
-        """Check if current leg is part of a spread strategy"""
+        """Check if current leg is part of a spread strategy (CE+PE SELL pairs - straddle/strangle)"""
         all_legs = self.strategy.legs.all()
         for other_leg in all_legs:
             if (other_leg.instrument == current_leg.instrument and
@@ -1111,6 +1149,208 @@ class StrategyExecutor:
                     (current_leg.option_type == 'PE' and other_leg.option_type == 'CE')):
                     return True
         return False
+
+    def _is_buy_part_of_spread(self, current_leg: StrategyLeg) -> bool:
+        """
+        Check if a BUY leg is part of a spread (has corresponding SELL leg).
+        This includes:
+        - Bull Call Spread (BUY CE + SELL CE)
+        - Bear Put Spread (BUY PE + SELL PE)
+        - Any spread where there's a matching SELL leg for the same instrument
+        """
+        if current_leg.action != 'BUY':
+            return False
+
+        all_legs = self.strategy.legs.all()
+        for other_leg in all_legs:
+            if (other_leg.instrument == current_leg.instrument and
+                other_leg.product_type == 'options' and
+                other_leg.action == 'SELL' and
+                other_leg.id != current_leg.id):
+                # Found a SELL leg for the same instrument - this is a spread
+                logger.info(f"[SPREAD DETECT] BUY leg {current_leg.option_type} has matching SELL leg {other_leg.option_type}")
+                return True
+        return False
+
+    def _pre_calculate_multi_leg_quantities(self, legs: List[StrategyLeg]):
+        """
+        Pre-calculate quantities for multi-leg strategies (straddles, strangles, spreads).
+        This ensures all related legs get the same quantity.
+
+        Strategy types handled:
+        - Straddle/Strangle: SELL CE + SELL PE (same instrument) -> use 'sell_c_and_p' margin once
+        - Spread: BUY CE + SELL CE or BUY PE + SELL PE -> use 'sell_c_p' margin once
+        """
+        logger.info(f"[PRE-CALC] Starting pre-calculation for {len(legs)} legs across {len(self.accounts)} accounts")
+
+        # Group legs by instrument and identify patterns
+        instrument_legs = {}
+        for leg in legs:
+            if leg.instrument not in instrument_legs:
+                instrument_legs[leg.instrument] = []
+            instrument_legs[leg.instrument].append(leg)
+
+        # Process each instrument group
+        for instrument, inst_legs in instrument_legs.items():
+            # Get option legs only
+            option_legs = [l for l in inst_legs if l.product_type == 'options']
+
+            if len(option_legs) < 2:
+                continue
+
+            # Check for straddle/strangle pattern (SELL CE + SELL PE)
+            sell_legs = [l for l in option_legs if l.action == 'SELL']
+            sell_ce_legs = [l for l in sell_legs if l.option_type == 'CE']
+            sell_pe_legs = [l for l in sell_legs if l.option_type == 'PE']
+
+            if sell_ce_legs and sell_pe_legs:
+                # This is a straddle/strangle
+                logger.info(f"[PRE-CALC] Detected straddle/strangle for {instrument}: "
+                           f"{len(sell_ce_legs)} SELL CE + {len(sell_pe_legs)} SELL PE")
+
+                # Calculate quantity once using 'sell_c_and_p' margin for all accounts
+                for account in self.accounts:
+                    self._pre_calculate_straddle_quantity(
+                        instrument,
+                        sell_ce_legs + sell_pe_legs,
+                        account
+                    )
+
+                # Also handle any BUY legs that are part of spreads with these SELL legs
+                buy_legs = [l for l in option_legs if l.action == 'BUY']
+                for buy_leg in buy_legs:
+                    # Find matching SELL leg (same option type)
+                    matching_sells = [s for s in sell_legs if s.option_type == buy_leg.option_type]
+                    if matching_sells:
+                        # BUY leg is part of spread, should use same quantity as SELL leg
+                        for account in self.accounts:
+                            key = f"{matching_sells[0].id}_{account.id}"
+                            if key in self.pre_calculated_quantities:
+                                buy_key = f"{buy_leg.id}_{account.id}"
+                                self.pre_calculated_quantities[buy_key] = self.pre_calculated_quantities[key]
+                                logger.info(f"[PRE-CALC] Spread BUY leg {buy_leg.id} assigned quantity "
+                                           f"{self.pre_calculated_quantities[buy_key]} from SELL leg {matching_sells[0].id}")
+            else:
+                # Check for simple spreads (BUY + SELL of same type)
+                for option_type in ['CE', 'PE']:
+                    type_legs = [l for l in option_legs if l.option_type == option_type]
+                    buy_legs = [l for l in type_legs if l.action == 'BUY']
+                    sell_legs = [l for l in type_legs if l.action == 'SELL']
+
+                    if buy_legs and sell_legs:
+                        # This is a spread (e.g., Bull Call Spread, Bear Put Spread)
+                        logger.info(f"[PRE-CALC] Detected {option_type} spread for {instrument}: "
+                                   f"{len(buy_legs)} BUY + {len(sell_legs)} SELL")
+
+                        # Calculate quantity using 'sell_c_p' margin for the SELL leg
+                        for account in self.accounts:
+                            self._pre_calculate_spread_quantity(
+                                instrument,
+                                buy_legs + sell_legs,
+                                account
+                            )
+
+        logger.info(f"[PRE-CALC] Pre-calculation complete. {len(self.pre_calculated_quantities)} quantities stored")
+
+    def _pre_calculate_straddle_quantity(self, instrument: str, sell_legs: List[StrategyLeg],
+                                          account: TradingAccount):
+        """
+        Calculate quantity once for a straddle/strangle and assign to all SELL legs.
+        Uses 'sell_c_and_p' margin which covers BOTH legs together.
+        """
+        if not self.margin_calculator:
+            return
+
+        lot_size = self._get_lot_size(sell_legs[0])
+
+        # Get available margin for the account
+        if account.id not in self.account_margins:
+            self.account_margins[account.id] = self.margin_calculator.get_available_margin(account)
+
+        available_margin = self.account_margins[account.id]
+
+        # Calculate using 'sell_c_and_p' margin (covers both legs)
+        optimal_lots, details = self.margin_calculator.calculate_lot_size_custom(
+            account=account,
+            instrument=instrument,
+            trade_type='sell_c_and_p',  # Combined margin for CE+PE
+            margin_percentage=self.margin_percentage,
+            available_margin=available_margin
+        )
+
+        if optimal_lots > 0:
+            # Convert lots to quantity
+            total_quantity = optimal_lots * lot_size
+
+            # Update margin used (only once for the entire straddle)
+            margin_used = optimal_lots * details.get('margin_per_lot', 0)
+            self.account_margins[account.id] -= margin_used
+
+            # Store quantity for ALL legs in the straddle
+            for leg in sell_legs:
+                key = f"{leg.id}_{account.id}"
+                self.pre_calculated_quantities[key] = total_quantity
+                logger.info(f"[PRE-CALC] Straddle leg {leg.id} ({leg.option_type}) for {account.account_name}: "
+                           f"{optimal_lots} lots = {total_quantity} qty")
+
+            logger.info(f"[PRE-CALC] Straddle margin calculation for {account.account_name}: "
+                       f"Margin used: {margin_used:,.2f}, Remaining: {self.account_margins[account.id]:,.2f}")
+        else:
+            # Store 0 quantity for insufficient margin
+            for leg in sell_legs:
+                key = f"{leg.id}_{account.id}"
+                self.pre_calculated_quantities[key] = 0
+            logger.warning(f"[PRE-CALC] Insufficient margin for straddle on {account.account_name}")
+
+    def _pre_calculate_spread_quantity(self, instrument: str, spread_legs: List[StrategyLeg],
+                                        account: TradingAccount):
+        """
+        Calculate quantity once for a spread (BUY + SELL) and assign to all legs.
+        Uses 'sell_c_p' margin for the SELL leg.
+        """
+        if not self.margin_calculator:
+            return
+
+        lot_size = self._get_lot_size(spread_legs[0])
+
+        # Get available margin for the account
+        if account.id not in self.account_margins:
+            self.account_margins[account.id] = self.margin_calculator.get_available_margin(account)
+
+        available_margin = self.account_margins[account.id]
+
+        # Calculate using 'sell_c_p' margin (single option selling)
+        optimal_lots, details = self.margin_calculator.calculate_lot_size_custom(
+            account=account,
+            instrument=instrument,
+            trade_type='sell_c_p',
+            margin_percentage=self.margin_percentage,
+            available_margin=available_margin
+        )
+
+        if optimal_lots > 0:
+            # Convert lots to quantity
+            total_quantity = optimal_lots * lot_size
+
+            # Update margin used
+            margin_used = optimal_lots * details.get('margin_per_lot', 0)
+            self.account_margins[account.id] -= margin_used
+
+            # Store quantity for ALL legs in the spread
+            for leg in spread_legs:
+                key = f"{leg.id}_{account.id}"
+                self.pre_calculated_quantities[key] = total_quantity
+                logger.info(f"[PRE-CALC] Spread leg {leg.id} ({leg.action} {leg.option_type}) for {account.account_name}: "
+                           f"{optimal_lots} lots = {total_quantity} qty")
+
+            logger.info(f"[PRE-CALC] Spread margin calculation for {account.account_name}: "
+                       f"Margin used: {margin_used:,.2f}, Remaining: {self.account_margins[account.id]:,.2f}")
+        else:
+            # Store 0 quantity for insufficient margin
+            for leg in spread_legs:
+                key = f"{leg.id}_{account.id}"
+                self.pre_calculated_quantities[key] = 0
+            logger.warning(f"[PRE-CALC] Insufficient margin for spread on {account.account_name}")
 
     def _get_lot_size(self, leg: StrategyLeg) -> int:
         """Get lot size for instrument from database"""
