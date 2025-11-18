@@ -1865,6 +1865,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         checkAndFreezePendingLegs();
         startStatusPolling();
     }, 1000); // Wait 1 second for data to load
+
+    // Auto-refresh Strategy Execution Tracking tabs every 3 seconds
+    setInterval(() => {
+        loadStrategyData();
+    }, 3000);
     {% endif %}
 
     // Set initial lot field state based on risk profile

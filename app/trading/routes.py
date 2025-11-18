@@ -1757,10 +1757,20 @@ def risk_status_stream():
 
     def generate():
         import traceback
+        refresh_counter = 0
         while True:
             try:
                 # Use app context for database operations
                 with app.app_context():
+                    # Refresh positions every 5 seconds to catch any missed subscriptions
+                    refresh_counter += 1
+                    if refresh_counter >= 5:
+                        try:
+                            from app.utils.position_monitor import position_monitor
+                            position_monitor.refresh_positions()
+                        except Exception as e:
+                            pass  # Non-critical, continue monitoring
+                        refresh_counter = 0
                     # Get all active strategies with monitoring enabled
                     strategies = Strategy.query.filter_by(
                         user_id=user_id,
@@ -1932,6 +1942,13 @@ def risk_status_stream():
                                     elif tp_hit:
                                         # Already hit - show distance from hit price
                                         tp_distance = 0
+
+                            # Ensure distance is 0 for hit positions (fallback for edge cases)
+                            # This handles cases where entry_price is 0, leg is None, or last_price is 0
+                            if sl_hit and sl_distance is None:
+                                sl_distance = 0
+                            if tp_hit and tp_distance is None:
+                                tp_distance = 0
 
                             executions_data.append({
                                 'id': execution.id,

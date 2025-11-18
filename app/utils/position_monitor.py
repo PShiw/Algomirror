@@ -477,7 +477,51 @@ class PositionMonitor:
         self.subscribed_symbols.clear()
         self.position_map.clear()
 
-        logger.info("Position monitoring stopped")
+    def refresh_positions(self):
+        """
+        Refresh position subscriptions by re-scanning database.
+        Called periodically to catch any positions that might have been missed.
+        """
+        if not self.is_running:
+            logger.debug("Position monitor not running - skipping refresh")
+            return
+
+        if not self.websocket_manager:
+            logger.debug("No WebSocket manager - skipping refresh")
+            return
+
+        try:
+            # Get current open positions from database
+            open_executions = self.get_open_positions()
+
+            if not open_executions:
+                return
+
+            # Subscribe to any new positions
+            for execution in open_executions:
+                key = f"{execution.symbol}_{execution.exchange}"
+
+                # Skip if already subscribed
+                if key in self.subscribed_symbols:
+                    # Make sure it's in the position map
+                    if key in self.position_map:
+                        if execution not in self.position_map[key]:
+                            self.position_map[key].append(execution)
+                    continue
+
+                # Subscribe to new symbol
+                self.websocket_manager.subscribe({
+                    'symbol': execution.symbol,
+                    'exchange': execution.exchange,
+                    'mode': 'quote'
+                })
+
+                self.subscribed_symbols.add(key)
+                self.position_map[key] = [execution]
+                logger.info(f"Refresh: Subscribed to {execution.symbol}")
+
+        except Exception as e:
+            logger.error(f"Error refreshing positions: {e}")
 
     def get_monitoring_status(self) -> Dict:
         """

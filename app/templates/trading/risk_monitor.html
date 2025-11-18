@@ -407,11 +407,14 @@ function updateRiskData(data) {
                 slPriceEl.textContent = execution.sl_price.toFixed(2);
                 slPriceEl.className = execution.sl_hit ? 'font-mono text-error animate-pulse' : 'font-mono text-error';
             }
-            if (slDistEl && execution.sl_distance !== null) {
-                const distText = execution.sl_distance >= 0
-                    ? `${execution.sl_distance.toFixed(1)} pts`
-                    : `<span class="text-error font-bold">HIT!</span>`;
-                slDistEl.innerHTML = `<span class="text-xs ${execution.sl_hit ? 'text-error font-bold' : ''}">${distText}</span>`;
+            if (slDistEl && execution.sl_distance !== null && execution.sl_distance !== undefined) {
+                // Check sl_hit first to show HIT! regardless of distance value
+                if (execution.sl_hit) {
+                    slDistEl.innerHTML = '<span class="text-xs text-error font-bold animate-pulse">HIT!</span>';
+                } else {
+                    const color = execution.sl_distance < 5 ? 'text-warning' : '';
+                    slDistEl.innerHTML = `<span class="text-xs ${color}">${execution.sl_distance.toFixed(1)} pts</span>`;
+                }
             }
 
             // Update TP Price and Distance
@@ -419,11 +422,14 @@ function updateRiskData(data) {
                 tpPriceEl.textContent = execution.tp_price.toFixed(2);
                 tpPriceEl.className = execution.tp_hit ? 'font-mono text-success animate-pulse' : 'font-mono text-success';
             }
-            if (tpDistEl && execution.tp_distance !== null) {
-                const distText = execution.tp_distance >= 0
-                    ? `${execution.tp_distance.toFixed(1)} pts`
-                    : `<span class="text-success font-bold">HIT!</span>`;
-                tpDistEl.innerHTML = `<span class="text-xs ${execution.tp_hit ? 'text-success font-bold' : ''}">${distText}</span>`;
+            if (tpDistEl && execution.tp_distance !== null && execution.tp_distance !== undefined) {
+                // Check tp_hit first to show HIT! regardless of distance value
+                if (execution.tp_hit) {
+                    tpDistEl.innerHTML = '<span class="text-xs text-success font-bold animate-pulse">HIT!</span>';
+                } else {
+                    const color = execution.tp_distance < 5 ? 'text-info' : '';
+                    tpDistEl.innerHTML = `<span class="text-xs ${color}">${execution.tp_distance.toFixed(1)} pts</span>`;
+                }
             }
 
             // Update status based on execution state
