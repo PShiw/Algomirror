@@ -132,6 +132,12 @@ class OptionChainBackgroundService:
     def start_service(self):
         """Start the background service"""
         if not self.is_running:
+            # Check if scheduler is actually already running
+            if self.scheduler.running:
+                self.is_running = True
+                logger.info("Background service already running")
+                return
+
             self.scheduler.start()
             self.is_running = True
             logger.info("Background service started")
