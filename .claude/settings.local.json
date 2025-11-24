@@ -1,37 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(set:*)",
-      "Bash(powershell -Command \"Get-Content ''D:\\openalgo-multi\\algomirror\\app\\templates\\margin\\dashboard.html'' -Tail 20\")",
-      "Bash(netstat:*)",
-      "Bash(findstr:*)",
-      "Bash(powershell -Command \"Stop-Process -Id 303780,287564 -Force\")",
-      "Bash(powershell -Command \"Get-Content ''D:\\openalgo-multi\\algomirror\\app\\templates\\strategy\\builder.html'' | Select-String -Pattern ''modifyLegPrice'' -Context 0,30\")",
-      "Bash(powershell -Command \"Stop-Process -Id 350676 -Force\")",
-      "Bash(powershell -Command \"Get-Content ''D:\\openalgo-multi\\algomirror\\app\\templates\\strategy\\builder.html'' | Select-String -Pattern ''entry_price'' -Context 0,30\")",
-      "Bash(powershell -Command \"Get-Content ''D:\\openalgo-multi\\algomirror\\app\\models.py'' | Select-String -Pattern ''class StrategyExecution'' -Context 0,100\")",
-      "Bash(powershell -Command \"Get-Content ''D:\\openalgo-multi\\algomirror\\app\\strategy\\routes.py'' | Select-String -Pattern ''placeorder'' -Context 30,10\")",
-      "Bash(powershell -Command \"Stop-Process -Id 38532 -Force\")",
-      "Bash(powershell -Command \"Stop-Process -Id 19428,49484 -Force\")",
-      "Bash(powershell -Command \"Stop-Process -Id 50056 -Force\")",
-      "Bash(powershell:*)",
-      "Bash(timeout /t 3)",
-      "Bash(nul)",
-      "Bash(.venv/Scripts/pip install:*)",
-      "Bash(.venvScriptspip install requests websocket-client)",
-      "Bash(python test_option_chain_websocket.py:*)",
-      "Bash(timeout /t 5)",
-      "Bash(python:*)",
-      "Bash(npm run build-css:*)",
-      "Bash(npm install)",
-      "Bash(.venvScriptspython.exe app.py)",
-      "Bash(Select-Object -Last 100)",
-      "Bash(.venv\\Scripts\\python.exe:*)",
-      "Bash(D:\\openalgo-multi\\algomirror\\.venv\\Scripts\\python.exe:*)",
-      "Bash(curl:*)",
-      "Bash(.venvScriptsflask db migrate -m \"Add sl_hit and tp_hit fields to StrategyExecution\")",
-      "Bash(timeout /t 2)"
+      "Bash(D:\\openalgo-multi\\algomirror\\.venv\\Scripts\\python.exe:*)"
     ],
     "deny": [],
     "ask": []

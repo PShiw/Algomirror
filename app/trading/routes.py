@@ -1813,31 +1813,23 @@ def risk_status_stream():
                                 current_app.logger.debug(f"[RISK SSE] Execution {execution.id}: NO LEG FOUND (leg_id={execution.leg_id})")
 
                             # Determine price source and LTP
-                            # Priority: WebSocket-updated last_price > option chain > calculated
+                            # Priority: WebSocket-updated last_price > cached last_price > calculated from P&L
                             price_source = 'offline'
                             last_price = 0
 
-                            # Check if execution has fresh WebSocket data
-                            if execution.websocket_subscribed and execution.last_price and execution.last_price > 0:
+                            # Check if execution has LTP from database (WebSocket or previous update)
+                            if execution.last_price and execution.last_price > 0:
                                 last_price = execution.last_price
+                                # Mark as realtime if we have valid price data
                                 price_source = 'realtime'
-                            elif execution.last_price and execution.last_price > 0:
-                                # Has cached price from database
-                                last_price = execution.last_price
-                                price_source = 'cached'
-                            else:
-                                # Try option chain service
-                                real_time_ltp = get_ltp_from_option_chain(execution.symbol, execution.exchange)
-                                if real_time_ltp:
-                                    last_price = real_time_ltp
-                                    price_source = 'realtime'
-                                elif execution.unrealized_pnl and entry_price > 0 and execution.quantity > 0:
-                                    # Back-calculate LTP from stored unrealized P&L
-                                    if action == 'BUY':
-                                        last_price = entry_price + (execution.unrealized_pnl / execution.quantity)
-                                    else:  # SELL
-                                        last_price = entry_price - (execution.unrealized_pnl / execution.quantity)
-                                    price_source = 'calculated'
+                            elif execution.unrealized_pnl and entry_price > 0 and execution.quantity > 0:
+                                # Back-calculate LTP from stored unrealized P&L
+                                if action == 'BUY':
+                                    last_price = entry_price + (execution.unrealized_pnl / execution.quantity)
+                                else:  # SELL
+                                    last_price = entry_price - (execution.unrealized_pnl / execution.quantity)
+                                # Mark as realtime since we have calculated price
+                                price_source = 'realtime'
 
                             # Calculate unrealized P&L with LTP
                             if last_price > 0 and entry_price > 0:

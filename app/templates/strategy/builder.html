@@ -2020,18 +2020,12 @@ function updateRiskMonitorTable(strategyData) {
 
         // Status badge based on price source
         let statusBadge;
-        switch (exec.price_source) {
-            case 'realtime':
-                statusBadge = '<span class="badge badge-success badge-xs">Live</span>';
-                break;
-            case 'cached':
-                statusBadge = '<span class="badge badge-info badge-xs">Cached</span>';
-                break;
-            case 'calculated':
-                statusBadge = '<span class="badge badge-info badge-xs">Est.</span>';
-                break;
-            default:
-                statusBadge = '<span class="badge badge-warning badge-xs">Offline</span>';
+        if (exec.price_source === 'realtime') {
+            // Show Live for any valid price data (WebSocket, cached, or calculated)
+            statusBadge = '<span class="badge badge-success badge-xs">Live</span>';
+        } else {
+            // Only show Offline if truly no price data available
+            statusBadge = '<span class="badge badge-ghost badge-xs">Offline</span>';
         }
 
         // SL display with color coding
