@@ -651,15 +651,15 @@ class StrategyExecutor:
                             selected_expiry = sorted_expiries[0]
 
                     elif leg.expiry == 'next_month':
-                        # Find next month's expiry
+                        # Find next month's monthly expiry (last expiry of next month)
                         next_month = (dt.now().month % 12) + 1
                         next_year = dt.now().year if next_month > dt.now().month else dt.now().year + 1
 
                         for exp_str in sorted_expiries:
                             exp_date = parse_expiry(exp_str)
                             if exp_date.month == next_month and exp_date.year == next_year:
+                                # Keep updating to get the last expiry of next month (monthly expiry)
                                 selected_expiry = exp_str
-                                break
 
                         # If no next month expiry found, use the first expiry after current month
                         if not selected_expiry:
