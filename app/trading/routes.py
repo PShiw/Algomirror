@@ -1832,13 +1832,17 @@ def risk_status_stream():
                                 price_source = 'realtime'
 
                             # Calculate unrealized P&L with LTP
-                            if last_price > 0 and entry_price > 0:
-                                if action == 'BUY':
-                                    unrealized_pnl = (last_price - entry_price) * execution.quantity
-                                else:  # SELL
-                                    unrealized_pnl = (entry_price - last_price) * execution.quantity
-                            else:
-                                unrealized_pnl = execution.unrealized_pnl or 0
+                            # Only calculate unrealized P&L for 'entered' status (open positions)
+                            # For 'exit_pending' and 'exited', use realized P&L only
+                            unrealized_pnl = 0
+                            if execution.status == 'entered':
+                                if last_price > 0 and entry_price > 0:
+                                    if action == 'BUY':
+                                        unrealized_pnl = (last_price - entry_price) * execution.quantity
+                                    else:  # SELL
+                                        unrealized_pnl = (entry_price - last_price) * execution.quantity
+                                else:
+                                    unrealized_pnl = execution.unrealized_pnl or 0
 
                             total_unrealized_pnl += unrealized_pnl
 
