@@ -339,7 +339,8 @@ function updateSignal(signal) {
     }
 
     signalElement.innerHTML = `<span class="badge ${badgeClass} badge-lg">${signal}</span>`;
-    timeElement.textContent = new Date().toLocaleTimeString();
+    // Display time in IST
+    timeElement.textContent = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
 }
 
 // Refresh chart manually

@@ -137,6 +137,8 @@ def get_chart_data(strategy_id):
         )
 
         # Prepare chart data
+        # IST offset: UTC+5:30 = 5*3600 + 30*60 = 19800 seconds
+        IST_OFFSET = 19800
         chart_data = []
         for i, timestamp in enumerate(spread_data.index):
             # Skip initial NaN values
@@ -144,7 +146,7 @@ def get_chart_data(strategy_id):
                 continue
 
             chart_data.append({
-                'time': int(timestamp.timestamp()),
+                'time': int(timestamp.timestamp()) + IST_OFFSET,  # Convert to IST for display
                 'open': float(spread_data['open'].iloc[i]),
                 'high': float(spread_data['high'].iloc[i]),
                 'low': float(spread_data['low'].iloc[i]),
