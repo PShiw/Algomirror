@@ -1,3 +1,8 @@
+# CRITICAL: Eventlet monkey patch must happen FIRST before any other imports
+# This fixes "RLock(s) were not greened" and prevents blocking I/O
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import logging
 import warnings
