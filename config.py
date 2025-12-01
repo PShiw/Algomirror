@@ -22,7 +22,7 @@ class Config:
     SESSION_TYPE = os.environ.get('SESSION_TYPE') or 'filesystem'
     SESSION_FILE_DIR = os.environ.get('SESSION_FILE_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'flask_session')
     SESSION_FILE_THRESHOLD = 500  # Max number of sessions to store
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=24)
+    PERMANENT_SESSION_LIFETIME = timedelta(days=30)
     SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
