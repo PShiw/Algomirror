@@ -1,6 +1,6 @@
 """
 Supertrend Indicator Module
-Uses pandas_ta's Supertrend which matches TradingView Pine Script exactly
+Uses TA-Lib ATR with Pine Script logic for TradingView compatibility
 
 Direction convention (matching Pine Script/TradingView):
     - direction = -1: Bullish (Up direction, green) - price above supertrend (lower band)
@@ -8,7 +8,7 @@ Direction convention (matching Pine Script/TradingView):
 """
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+import talib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def calculate_supertrend(high, low, close, period=7, multiplier=3):
     """
-    Calculate Supertrend indicator using pandas_ta (matches TradingView exactly)
+    Calculate Supertrend indicator matching TradingView Pine Script
 
     Args:
         high: High price array (numpy array or pandas Series)
@@ -33,38 +33,101 @@ def calculate_supertrend(high, low, close, period=7, multiplier=3):
         - short: Short (resistance) line - visible when bearish
     """
     try:
-        # Create DataFrame for pandas_ta
-        df = pd.DataFrame({
-            'high': high,
-            'low': low,
-            'close': close
-        })
+        # Convert to numpy arrays if needed
+        if hasattr(high, 'values'):
+            high = high.values.astype(np.float64)
+        else:
+            high = np.asarray(high, dtype=np.float64)
 
-        # Calculate Supertrend using pandas_ta
-        # Returns columns: SUPERT_{length}_{multiplier}, SUPERTd_{length}_{multiplier},
-        #                  SUPERTl_{length}_{multiplier}, SUPERTs_{length}_{multiplier}
-        st = ta.supertrend(df['high'], df['low'], df['close'], length=period, multiplier=float(multiplier))
+        if hasattr(low, 'values'):
+            low = low.values.astype(np.float64)
+        else:
+            low = np.asarray(low, dtype=np.float64)
 
-        if st is None or st.empty:
-            logger.error("pandas_ta supertrend returned None or empty")
-            nan_array = np.full(len(close), np.nan)
-            return nan_array, nan_array, nan_array, nan_array
+        if hasattr(close, 'values'):
+            close = close.values.astype(np.float64)
+        else:
+            close = np.asarray(close, dtype=np.float64)
 
-        # Extract columns
-        col_prefix = f"SUPERT_{period}_{float(multiplier)}"
-        trend = st[f'{col_prefix}'].values
-        direction_raw = st[f'SUPERTd_{period}_{float(multiplier)}'].values
-        long_line = st[f'SUPERTl_{period}_{float(multiplier)}'].values
-        short_line = st[f'SUPERTs_{period}_{float(multiplier)}'].values
+        n = len(close)
 
-        # pandas_ta uses: 1 for bullish (up), -1 for bearish (down)
-        # Pine Script uses: -1 for bullish, 1 for bearish
-        # Convert to match Pine Script convention
-        direction = np.where(direction_raw == 1, -1.0, 1.0)
+        # Calculate ATR using TA-Lib (Wilder's smoothing)
+        atr = talib.ATR(high, low, close, period)
+
+        # Calculate basic bands (src = hl2 in Pine Script)
+        hl_avg = (high + low) / 2.0
+        upper_band = hl_avg + multiplier * atr
+        lower_band = hl_avg - multiplier * atr
+
+        # Initialize arrays
+        final_upper = np.full(n, np.nan)
+        final_lower = np.full(n, np.nan)
+        supertrend = np.full(n, np.nan)
+        direction = np.full(n, np.nan)
+        long_line = np.full(n, np.nan)
+        short_line = np.full(n, np.nan)
+
+        # Find first valid ATR index
+        first_valid = -1
+        for i in range(n):
+            if not np.isnan(atr[i]):
+                first_valid = i
+                break
+
+        if first_valid < 0 or first_valid >= n:
+            return supertrend, direction, long_line, short_line
+
+        # Initialize first valid values
+        # Pine Script: if na(atr[1]) _direction := 1 (first bar is downtrend)
+        final_upper[first_valid] = upper_band[first_valid]
+        final_lower[first_valid] = lower_band[first_valid]
+        direction[first_valid] = 1.0  # downtrend (red in Pine Script)
+        supertrend[first_valid] = final_upper[first_valid]
+        short_line[first_valid] = final_upper[first_valid]
+
+        # Pine Script logic for subsequent bars
+        for i in range(first_valid + 1, n):
+            # Final lower band: lowerBand > prevLowerBand or close[1] < prevLowerBand ? lowerBand : prevLowerBand
+            if lower_band[i] > final_lower[i-1] or close[i-1] < final_lower[i-1]:
+                final_lower[i] = lower_band[i]
+            else:
+                final_lower[i] = final_lower[i-1]
+
+            # Final upper band: upperBand < prevUpperBand or close[1] > prevUpperBand ? upperBand : prevUpperBand
+            if upper_band[i] < final_upper[i-1] or close[i-1] > final_upper[i-1]:
+                final_upper[i] = upper_band[i]
+            else:
+                final_upper[i] = final_upper[i-1]
+
+            # Direction logic (Pine Script)
+            # if prevSuperTrend == prevUpperBand
+            #     _direction := close > upperBand ? -1 : 1
+            # else
+            #     _direction := close < lowerBand ? 1 : -1
+            if supertrend[i-1] == final_upper[i-1]:
+                # Previous was upper band (downtrend)
+                if close[i] > final_upper[i]:
+                    direction[i] = -1.0  # Change to uptrend (green)
+                else:
+                    direction[i] = 1.0   # Continue downtrend (red)
+            else:
+                # Previous was lower band (uptrend)
+                if close[i] < final_lower[i]:
+                    direction[i] = 1.0   # Change to downtrend (red)
+                else:
+                    direction[i] = -1.0  # Continue uptrend (green)
+
+            # Supertrend assignment: _direction == -1 ? lowerBand : upperBand
+            if direction[i] == -1.0:  # uptrend (green)
+                supertrend[i] = final_lower[i]
+                long_line[i] = final_lower[i]
+            else:  # downtrend (red)
+                supertrend[i] = final_upper[i]
+                short_line[i] = final_upper[i]
 
         logger.debug(f"Supertrend calculated: period={period}, multiplier={multiplier}")
 
-        return trend, direction, long_line, short_line
+        return supertrend, direction, long_line, short_line
 
     except Exception as e:
         logger.error(f"Error calculating Supertrend: {e}", exc_info=True)
