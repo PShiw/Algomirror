@@ -23,38 +23,47 @@
                 <form id="niftyForm" class="space-y-4">
                     <div class="form-control">
                         <label class="label">
-                            <span class="label-text font-semibold">Lot Size</span>
+                            <span class="label-text font-semibold">Lot Size (Current Month)</span>
                             <span class="label-text-alt">Quantity per lot</span>
                         </label>
-                        <input type="number" 
-                               id="nifty_lot_size" 
-                               name="lot_size" 
+                        <input type="number"
+                               id="nifty_lot_size"
+                               name="lot_size"
                                class="input input-bordered"
                                value="{{ nifty_settings.lot_size }}"
                                min="1"
                                max="1000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ nifty_settings.lot_size }}</span>
-                        </label>
                     </div>
-                    
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">Lot Size (Next Month)</span>
+                            <span class="label-text-alt">For next month contracts</span>
+                        </label>
+                        <input type="number"
+                               id="nifty_next_lot_size"
+                               name="next_month_lot_size"
+                               class="input input-bordered"
+                               value="{{ nifty_settings.next_month_lot_size or nifty_settings.lot_size }}"
+                               min="1"
+                               max="1000"
+                               required>
+                    </div>
+
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text font-semibold">Freeze Quantity</span>
                             <span class="label-text-alt">Max quantity per order</span>
                         </label>
-                        <input type="number" 
-                               id="nifty_freeze_qty" 
-                               name="freeze_quantity" 
+                        <input type="number"
+                               id="nifty_freeze_qty"
+                               name="freeze_quantity"
                                class="input input-bordered"
                                value="{{ nifty_settings.freeze_quantity }}"
                                min="1"
                                max="50000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ nifty_settings.freeze_quantity }}</span>
-                        </label>
                     </div>
                     
                     <div class="stats stats-vertical lg:stats-horizontal shadow">
@@ -87,38 +96,47 @@
                 <form id="bankniftyForm" class="space-y-4">
                     <div class="form-control">
                         <label class="label">
-                            <span class="label-text font-semibold">Lot Size</span>
+                            <span class="label-text font-semibold">Lot Size (Current Month)</span>
                             <span class="label-text-alt">Quantity per lot</span>
                         </label>
-                        <input type="number" 
-                               id="banknifty_lot_size" 
-                               name="lot_size" 
+                        <input type="number"
+                               id="banknifty_lot_size"
+                               name="lot_size"
                                class="input input-bordered"
                                value="{{ banknifty_settings.lot_size }}"
                                min="1"
                                max="1000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ banknifty_settings.lot_size }}</span>
-                        </label>
                     </div>
-                    
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">Lot Size (Next Month)</span>
+                            <span class="label-text-alt">For next month contracts</span>
+                        </label>
+                        <input type="number"
+                               id="banknifty_next_lot_size"
+                               name="next_month_lot_size"
+                               class="input input-bordered"
+                               value="{{ banknifty_settings.next_month_lot_size or banknifty_settings.lot_size }}"
+                               min="1"
+                               max="1000"
+                               required>
+                    </div>
+
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text font-semibold">Freeze Quantity</span>
                             <span class="label-text-alt">Max quantity per order</span>
                         </label>
-                        <input type="number" 
-                               id="banknifty_freeze_qty" 
-                               name="freeze_quantity" 
+                        <input type="number"
+                               id="banknifty_freeze_qty"
+                               name="freeze_quantity"
                                class="input input-bordered"
                                value="{{ banknifty_settings.freeze_quantity }}"
                                min="1"
                                max="50000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ banknifty_settings.freeze_quantity }}</span>
-                        </label>
                     </div>
                     
                     <div class="stats stats-vertical lg:stats-horizontal shadow">
@@ -151,38 +169,47 @@
                 <form id="sensexForm" class="space-y-4">
                     <div class="form-control">
                         <label class="label">
-                            <span class="label-text font-semibold">Lot Size</span>
+                            <span class="label-text font-semibold">Lot Size (Current Month)</span>
                             <span class="label-text-alt">Quantity per lot</span>
                         </label>
-                        <input type="number" 
-                               id="sensex_lot_size" 
-                               name="lot_size" 
+                        <input type="number"
+                               id="sensex_lot_size"
+                               name="lot_size"
                                class="input input-bordered"
                                value="{{ sensex_settings.lot_size }}"
                                min="1"
                                max="1000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ sensex_settings.lot_size }}</span>
-                        </label>
                     </div>
-                    
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">Lot Size (Next Month)</span>
+                            <span class="label-text-alt">For next month contracts</span>
+                        </label>
+                        <input type="number"
+                               id="sensex_next_lot_size"
+                               name="next_month_lot_size"
+                               class="input input-bordered"
+                               value="{{ sensex_settings.next_month_lot_size or sensex_settings.lot_size }}"
+                               min="1"
+                               max="1000"
+                               required>
+                    </div>
+
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text font-semibold">Freeze Quantity</span>
                             <span class="label-text-alt">Max quantity per order</span>
                         </label>
-                        <input type="number" 
-                               id="sensex_freeze_qty" 
-                               name="freeze_quantity" 
+                        <input type="number"
+                               id="sensex_freeze_qty"
+                               name="freeze_quantity"
                                class="input input-bordered"
                                value="{{ sensex_settings.freeze_quantity }}"
                                min="1"
                                max="50000"
                                required>
-                        <label class="label">
-                            <span class="label-text-alt">Current: {{ sensex_settings.freeze_quantity }}</span>
-                        </label>
                     </div>
                     
                     <div class="stats stats-vertical lg:stats-horizontal shadow">
@@ -210,11 +237,13 @@
         <div class="card-body">
             <h3 class="card-title">Important Information</h3>
             <ul class="list-disc list-inside space-y-2">
-                <li><strong>Lot Size:</strong> Number of shares/units in one lot of the index</li>
+                <li><strong>Lot Size (Current Month):</strong> Number of shares/units in one lot for current month contracts</li>
+                <li><strong>Lot Size (Next Month):</strong> Number of shares/units in one lot for next month contracts (may differ due to exchange circulars)</li>
                 <li><strong>Freeze Quantity:</strong> Maximum quantity allowed in a single order by the exchange</li>
-                <li><strong>Max Lots:</strong> Automatically calculated (Freeze Quantity ÷ Lot Size)</li>
-                <li>These settings will be used for future order placement and position sizing</li>
-                <li>As per exchange circulars (May 2025): NIFTY lot size is 75, BANKNIFTY lot size is 35, SENSEX lot size is 20</li>
+                <li><strong>Max Lots:</strong> Automatically calculated (Freeze Quantity ÷ Current Month Lot Size)</li>
+                <li>These settings will be used for order placement and position sizing based on contract expiry</li>
+                <li>Current Month Lot Sizes: NIFTY=75, BANKNIFTY=30, SENSEX=20</li>
+                <li>Next Month Lot Sizes (Jan 2025+): NIFTY=65, BANKNIFTY=35, SENSEX=20</li>
             </ul>
         </div>
     </div>
@@ -253,10 +282,11 @@ function calculateSensexMaxLots() {
 // Handle NIFTY form submission
 document.getElementById('niftyForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const lotSize = document.getElementById('nifty_lot_size').value;
+    const nextLotSize = document.getElementById('nifty_next_lot_size').value;
     const freezeQty = document.getElementById('nifty_freeze_qty').value;
-    
+
     try {
         const response = await fetch('/trading/settings/update', {
             method: 'POST',
@@ -267,6 +297,7 @@ document.getElementById('niftyForm').addEventListener('submit', async (e) => {
             body: JSON.stringify({
                 symbol: 'NIFTY',
                 lot_size: lotSize,
+                next_month_lot_size: nextLotSize,
                 freeze_quantity: freezeQty
             })
         });
@@ -288,10 +319,11 @@ document.getElementById('niftyForm').addEventListener('submit', async (e) => {
 // Handle BANKNIFTY form submission
 document.getElementById('bankniftyForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const lotSize = document.getElementById('banknifty_lot_size').value;
+    const nextLotSize = document.getElementById('banknifty_next_lot_size').value;
     const freezeQty = document.getElementById('banknifty_freeze_qty').value;
-    
+
     try {
         const response = await fetch('/trading/settings/update', {
             method: 'POST',
@@ -302,6 +334,7 @@ document.getElementById('bankniftyForm').addEventListener('submit', async (e) =>
             body: JSON.stringify({
                 symbol: 'BANKNIFTY',
                 lot_size: lotSize,
+                next_month_lot_size: nextLotSize,
                 freeze_quantity: freezeQty
             })
         });
@@ -323,10 +356,11 @@ document.getElementById('bankniftyForm').addEventListener('submit', async (e) =>
 // Handle SENSEX form submission
 document.getElementById('sensexForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const lotSize = document.getElementById('sensex_lot_size').value;
+    const nextLotSize = document.getElementById('sensex_next_lot_size').value;
     const freezeQty = document.getElementById('sensex_freeze_qty').value;
-    
+
     try {
         const response = await fetch('/trading/settings/update', {
             method: 'POST',
@@ -337,6 +371,7 @@ document.getElementById('sensexForm').addEventListener('submit', async (e) => {
             body: JSON.stringify({
                 symbol: 'SENSEX',
                 lot_size: lotSize,
+                next_month_lot_size: nextLotSize,
                 freeze_quantity: freezeQty
             })
         });

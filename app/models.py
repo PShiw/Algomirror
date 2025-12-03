@@ -525,55 +525,63 @@ class SpecialTradingSession(db.Model):
 
 class TradingSettings(db.Model):
     __tablename__ = 'trading_settings'
-    
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Fixed table name
     symbol = db.Column(db.String(50), nullable=False)  # 'NIFTY', 'BANKNIFTY', 'SENSEX'
-    lot_size = db.Column(db.Integer, nullable=False, default=25)
+    lot_size = db.Column(db.Integer, nullable=False, default=25)  # Current month lot size
+    next_month_lot_size = db.Column(db.Integer, nullable=True)  # Next month lot size (for new contracts with different lot size)
     freeze_quantity = db.Column(db.Integer, nullable=False, default=1800)
     max_lots_per_order = db.Column(db.Integer, default=36)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationship
     user = db.relationship('User', backref='trading_settings')
-    
+
     # Unique constraint for user and symbol
     __table_args__ = (
         db.UniqueConstraint('user_id', 'symbol', name='_user_symbol_uc'),
     )
-    
+
     def __repr__(self):
-        return f'<TradingSettings {self.symbol} - Lot: {self.lot_size}, Freeze: {self.freeze_quantity}>'
+        return f'<TradingSettings {self.symbol} - Lot: {self.lot_size}, NextLot: {self.next_month_lot_size}, Freeze: {self.freeze_quantity}>'
     
     @staticmethod
     def get_or_create_defaults(user_id):
         """Create default settings for NIFTY, BANKNIFTY, and SENSEX if they don't exist"""
-        # Lot sizes from instructions.md (as of May 2025)
+        # Lot sizes: current month and next month (Jan 2025 onwards for NSE)
+        # BSE (SENSEX) has no lot size change
         # Freeze quantities are based on exchange rules
+        # Updated freeze quantities as per NSE circular effective Dec 1, 2025
         defaults = [
-            {'symbol': 'NIFTY', 'lot_size': 75, 'freeze_quantity': 1800, 'max_lots_per_order': 24},
-            {'symbol': 'BANKNIFTY', 'lot_size': 35, 'freeze_quantity': 900, 'max_lots_per_order': 25},
-            {'symbol': 'SENSEX', 'lot_size': 20, 'freeze_quantity': 1000, 'max_lots_per_order': 50}
+            {'symbol': 'NIFTY', 'lot_size': 75, 'next_month_lot_size': 75, 'freeze_quantity': 1800, 'max_lots_per_order': 24},
+            {'symbol': 'BANKNIFTY', 'lot_size': 30, 'next_month_lot_size': 30, 'freeze_quantity': 600, 'max_lots_per_order': 20},
+            {'symbol': 'FINNIFTY', 'lot_size': 25, 'next_month_lot_size': 25, 'freeze_quantity': 1200, 'max_lots_per_order': 48},
+            {'symbol': 'MIDCPNIFTY', 'lot_size': 50, 'next_month_lot_size': 50, 'freeze_quantity': 2800, 'max_lots_per_order': 56},
+            {'symbol': 'NIFTYNXT50', 'lot_size': 25, 'next_month_lot_size': 25, 'freeze_quantity': 600, 'max_lots_per_order': 24},
+            {'symbol': 'SENSEX', 'lot_size': 10, 'next_month_lot_size': 10, 'freeze_quantity': 1000, 'max_lots_per_order': 100},
+            {'symbol': 'BANKEX', 'lot_size': 15, 'next_month_lot_size': 15, 'freeze_quantity': 900, 'max_lots_per_order': 60},
         ]
-        
+
         for default in defaults:
             setting = TradingSettings.query.filter_by(
-                user_id=user_id, 
+                user_id=user_id,
                 symbol=default['symbol']
             ).first()
-            
+
             if not setting:
                 setting = TradingSettings(
                     user_id=user_id,
                     symbol=default['symbol'],
                     lot_size=default['lot_size'],
+                    next_month_lot_size=default.get('next_month_lot_size'),
                     freeze_quantity=default['freeze_quantity'],
                     max_lots_per_order=default['max_lots_per_order']
                 )
                 db.session.add(setting)
-        
+
         db.session.commit()
 
 class MarginRequirement(db.Model):

@@ -1475,8 +1475,11 @@ class StrategyExecutor:
             logger.warning(f"[PRE-CALC] Insufficient margin for spread on {account.account_name}")
 
     def _get_lot_size(self, leg: StrategyLeg) -> int:
-        """Get lot size for instrument from database"""
+        """Get lot size for instrument from database based on expiry type"""
         from app.models import TradingSettings
+
+        # Determine if this is a next month contract
+        is_next_month = leg.expiry in ['next_month', 'next_week'] if leg.expiry else False
 
         # Try to get lot size from user's trading settings
         if self.strategy.user_id:
@@ -1487,16 +1490,22 @@ class StrategyExecutor:
             ).first()
 
             if setting:
-                logger.info(f"Using lot size {setting.lot_size} for {leg.instrument} from database")
-                return setting.lot_size
+                # Use next_month_lot_size if available and expiry is next month
+                if is_next_month and setting.next_month_lot_size:
+                    logger.info(f"Using next_month_lot_size {setting.next_month_lot_size} for {leg.instrument} (expiry={leg.expiry})")
+                    return setting.next_month_lot_size
+                else:
+                    logger.info(f"Using lot_size {setting.lot_size} for {leg.instrument} (expiry={leg.expiry})")
+                    return setting.lot_size
 
         # Fallback to defaults if not found (shouldn't happen if settings are initialized)
         default_lot_sizes = {
             'NIFTY': 75,
-            'BANKNIFTY': 35,
-            'FINNIFTY': 65,
-            'MIDCPNIFTY': 75,
-            'SENSEX': 20
+            'BANKNIFTY': 30,
+            'FINNIFTY': 25,
+            'MIDCPNIFTY': 50,
+            'SENSEX': 10,
+            'BANKEX': 15
         }
         lot_size = default_lot_sizes.get(leg.instrument, 75)
         logger.warning(f"Using default lot size {lot_size} for {leg.instrument}")

@@ -52,21 +52,30 @@ def update():
         
         # Validate inputs
         lot_size = data.get('lot_size')
+        next_month_lot_size = data.get('next_month_lot_size')
         freeze_quantity = data.get('freeze_quantity')
-        
+
         if not lot_size or not freeze_quantity:
             return jsonify({'success': False, 'message': 'Lot size and freeze quantity are required'}), 400
-        
+
         try:
             lot_size = int(lot_size)
             freeze_quantity = int(freeze_quantity)
+            # next_month_lot_size is optional, defaults to lot_size if not provided
+            if next_month_lot_size:
+                next_month_lot_size = int(next_month_lot_size)
+            else:
+                next_month_lot_size = lot_size
         except ValueError:
             return jsonify({'success': False, 'message': 'Invalid number format'}), 400
-        
+
         # Validate ranges
         if lot_size <= 0 or lot_size > 1000:
             return jsonify({'success': False, 'message': 'Lot size must be between 1 and 1000'}), 400
-        
+
+        if next_month_lot_size <= 0 or next_month_lot_size > 1000:
+            return jsonify({'success': False, 'message': 'Next month lot size must be between 1 and 1000'}), 400
+
         if freeze_quantity <= 0 or freeze_quantity > 50000:
             return jsonify({'success': False, 'message': 'Freeze quantity must be between 1 and 50000'}), 400
         
@@ -90,17 +99,19 @@ def update():
         
         # Update values
         setting.lot_size = lot_size
+        setting.next_month_lot_size = next_month_lot_size
         setting.freeze_quantity = freeze_quantity
         setting.max_lots_per_order = max_lots
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'{symbol} settings updated successfully',
             'data': {
                 'symbol': symbol,
                 'lot_size': lot_size,
+                'next_month_lot_size': next_month_lot_size,
                 'freeze_quantity': freeze_quantity,
                 'max_lots_per_order': max_lots
             }
@@ -136,6 +147,7 @@ def get_setting(symbol):
         'data': {
             'symbol': setting.symbol,
             'lot_size': setting.lot_size,
+            'next_month_lot_size': setting.next_month_lot_size or setting.lot_size,
             'freeze_quantity': setting.freeze_quantity,
             'max_lots_per_order': setting.max_lots_per_order
         }
