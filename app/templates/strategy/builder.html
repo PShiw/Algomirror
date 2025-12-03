@@ -773,8 +773,6 @@
                 <select class="select select-bordered select-sm leg-instrument text-black">
                     <option value="NIFTY">NIFTY</option>
                     <option value="BANKNIFTY">BANKNIFTY</option>
-                    <option value="FINNIFTY">FINNIFTY</option>
-                    <option value="MIDCPNIFTY">MIDCPNIFTY</option>
                     <option value="SENSEX">SENSEX</option>
                 </select>
             </div>
@@ -956,8 +954,6 @@ async function fetchLotSizes() {
             lotSizes = {
                 'NIFTY': 75,
                 'BANKNIFTY': 35,
-                'FINNIFTY': 65,
-                'MIDCPNIFTY': 75,
                 'SENSEX': 20,
                 ...data  // Override with database values
             };
@@ -966,8 +962,6 @@ async function fetchLotSizes() {
             lotSizes = {
                 'NIFTY': 75,
                 'BANKNIFTY': 35,
-                'FINNIFTY': 65,
-                'MIDCPNIFTY': 75,
                 'SENSEX': 20
             };
         }
@@ -977,8 +971,6 @@ async function fetchLotSizes() {
         lotSizes = {
             'NIFTY': 75,
             'BANKNIFTY': 35,
-            'FINNIFTY': 65,
-            'MIDCPNIFTY': 75,
             'SENSEX': 20
         };
         console.log('Using default lot sizes (error occurred)');

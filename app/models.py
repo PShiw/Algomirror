@@ -557,12 +557,8 @@ class TradingSettings(db.Model):
         # Updated freeze quantities as per NSE circular effective Dec 1, 2025
         defaults = [
             {'symbol': 'NIFTY', 'lot_size': 75, 'next_month_lot_size': 75, 'freeze_quantity': 1800, 'max_lots_per_order': 24},
-            {'symbol': 'BANKNIFTY', 'lot_size': 30, 'next_month_lot_size': 30, 'freeze_quantity': 600, 'max_lots_per_order': 20},
-            {'symbol': 'FINNIFTY', 'lot_size': 25, 'next_month_lot_size': 25, 'freeze_quantity': 1200, 'max_lots_per_order': 48},
-            {'symbol': 'MIDCPNIFTY', 'lot_size': 50, 'next_month_lot_size': 50, 'freeze_quantity': 2800, 'max_lots_per_order': 56},
-            {'symbol': 'NIFTYNXT50', 'lot_size': 25, 'next_month_lot_size': 25, 'freeze_quantity': 600, 'max_lots_per_order': 24},
-            {'symbol': 'SENSEX', 'lot_size': 10, 'next_month_lot_size': 10, 'freeze_quantity': 1000, 'max_lots_per_order': 100},
-            {'symbol': 'BANKEX', 'lot_size': 15, 'next_month_lot_size': 15, 'freeze_quantity': 900, 'max_lots_per_order': 60},
+            {'symbol': 'BANKNIFTY', 'lot_size': 35, 'next_month_lot_size': 30, 'freeze_quantity': 600, 'max_lots_per_order': 17},
+            {'symbol': 'SENSEX', 'lot_size': 20, 'next_month_lot_size': 20, 'freeze_quantity': 1000, 'max_lots_per_order': 50},
         ]
 
         for default in defaults:
