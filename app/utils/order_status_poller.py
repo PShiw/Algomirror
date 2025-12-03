@@ -228,8 +228,18 @@ class OrderStatusPoller:
                             # Only update exit_price if we have a valid average_price
                             if avg_price and avg_price > 0:
                                 execution.exit_price = avg_price
+                                # Calculate realized P&L based on action (BUY/SELL)
+                                if execution.leg and execution.entry_price:
+                                    if execution.leg.action.upper() == 'BUY':
+                                        execution.realized_pnl = (avg_price - execution.entry_price) * execution.quantity
+                                    else:
+                                        execution.realized_pnl = (execution.entry_price - avg_price) * execution.quantity
+                                    logger.info(f"[P&L] Calculated realized P&L for {execution.symbol}: Rs.{execution.realized_pnl:.2f}")
                             else:
                                 logger.warning(f"[PRICE WARNING] Exit order {order_id} complete but no valid average_price, keeping existing exit_price: {execution.exit_price}")
+                                # Fallback: use unrealized_pnl if exit price unavailable
+                                if execution.unrealized_pnl:
+                                    execution.realized_pnl = execution.unrealized_pnl
                             if not execution.exit_time:
                                 execution.exit_time = datetime.utcnow()
 
