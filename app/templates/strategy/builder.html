@@ -268,8 +268,8 @@
                                     <span class="label-text text-xs">Exit Type</span>
                                 </label>
                                 <select id="supertrendExitType" class="select select-bordered select-sm" disabled>
-                                    <option value="breakout" {% if strategy and strategy.supertrend_exit_type == 'breakout' %}selected{% endif %}>Breakout</option>
-                                    <option value="breakdown" {% if strategy and strategy.supertrend_exit_type == 'breakdown' %}selected{% endif %}>Breakdown</option>
+                                    <option value="breakout" {% if strategy and strategy.supertrend_exit_type == 'breakout' %}selected{% endif %}>Breakout (Net Credit)</option>
+                                    <option value="breakdown" {% if strategy and strategy.supertrend_exit_type == 'breakdown' %}selected{% endif %}>Breakdown (Net Debit)</option>
                                 </select>
                             </div>
                             <div class="form-control">
@@ -659,7 +659,7 @@
                             </div>
                             <div class="text-sm mb-2">
                                 <span class="text-base-content/60">Type:</span>
-                                <span class="badge badge-outline badge-sm ml-1">{{ strategy.supertrend_exit_type|capitalize if strategy.supertrend_exit_type else 'Breakout' }}</span>
+                                <span class="badge badge-outline badge-sm ml-1">{% if strategy.supertrend_exit_type == 'breakout' %}Breakout (Net Credit){% elif strategy.supertrend_exit_type == 'breakdown' %}Breakdown (Net Debit){% else %}Breakout (Net Credit){% endif %}</span>
                             </div>
                             <div class="text-sm">
                                 <span class="text-base-content/60">Status:</span>
