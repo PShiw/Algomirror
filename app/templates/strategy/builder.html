@@ -941,6 +941,27 @@
     </form>
 </dialog>
 
+<!-- Cancel Order Modal -->
+<dialog id="cancel_order_modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg">Cancel Pending Order</h3>
+        <p class="py-4">Are you sure you want to cancel the pending order for <span class="font-semibold text-primary" id="cancel_order_leg_text">Leg 1</span>?</p>
+        <div class="alert alert-info mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>This will cancel all pending orders for this leg across all accounts.</span>
+        </div>
+        <div class="modal-action">
+            <button type="button" class="btn btn-ghost" onclick="cancel_order_modal.close()">Keep Order</button>
+            <button type="button" class="btn btn-warning" onclick="confirmCancelOrder()">Cancel Order</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
 <script>
 let legCount = 0;
 let lotSizes = {};  // Store lot sizes fetched from backend
@@ -1177,14 +1198,36 @@ function freezeLeg(legItem, isExecuted, isPending = false) {
     }
 }
 
-// Cancel pending order for a leg
-async function cancelLegOrder(button) {
+// Store reference to leg being cancelled
+let cancelOrderLegItem = null;
+
+// Cancel pending order for a leg - show modal
+function cancelLegOrder(button) {
     const legItem = button.closest('.leg-item');
     const legNumber = legItem.querySelector('.leg-number').textContent;
 
-    if (!confirm(`Cancel pending order for Leg ${legNumber}?`)) {
+    // Store reference for confirmation
+    cancelOrderLegItem = legItem;
+
+    // Update modal text
+    document.getElementById('cancel_order_leg_text').textContent = `Leg ${legNumber}`;
+
+    // Show modal
+    cancel_order_modal.showModal();
+}
+
+// Confirm cancel order from modal
+async function confirmCancelOrder() {
+    // Close modal
+    cancel_order_modal.close();
+
+    if (!cancelOrderLegItem) {
+        showNotification('No leg selected for cancellation', 'error');
         return;
     }
+
+    const legItem = cancelOrderLegItem;
+    cancelOrderLegItem = null; // Clear reference
 
     try {
         // Get leg ID from execution data
