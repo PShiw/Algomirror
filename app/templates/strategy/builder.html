@@ -1165,10 +1165,11 @@ function freezeLeg(legItem, isExecuted, isPending = false) {
             badge.classList.remove('badge-success', 'badge-warning');
         }
 
-        // Hide cancel and close buttons
+        // Hide cancel, close, modify, and convert buttons
         const cancelBtn = legItem.querySelector('.leg-cancel-btn');
         const closeBtn = legItem.querySelector('.leg-close-btn');
         const modifyBtn = legItem.querySelector('.leg-modify-btn');
+        const convertBtn = legItem.querySelector('.leg-convert-btn');
         if (cancelBtn) {
             cancelBtn.style.display = 'none';
         }
@@ -1177,6 +1178,9 @@ function freezeLeg(legItem, isExecuted, isPending = false) {
         }
         if (modifyBtn) {
             modifyBtn.style.display = 'none';
+        }
+        if (convertBtn) {
+            convertBtn.style.display = 'none';
         }
 
         // Enable all inputs and selects

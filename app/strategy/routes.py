@@ -577,13 +577,28 @@ def cancel_leg_orders(strategy_id, leg_id):
                 errors.append(f"Order {execution.order_id}: {str(e)}")
                 logger.error(f"Exception cancelling order {execution.order_id}: {e}")
 
+        # Check if leg has any remaining active executions (entered with complete status)
+        remaining_active = StrategyExecution.query.filter_by(
+            strategy_id=strategy_id,
+            leg_id=leg_id,
+            status='entered'
+        ).filter(
+            StrategyExecution.broker_order_status.in_(['complete', 'traded', 'filled'])
+        ).count()
+
+        # If all orders were cancelled and no active positions remain, reset leg execution status
+        if cancelled_count > 0 and remaining_active == 0:
+            leg.is_executed = False
+            logger.info(f"Reset leg {leg.leg_number} is_executed to False (all orders cancelled, no active positions)")
+
         db.session.commit()
 
         if cancelled_count > 0 and failed_count == 0:
             return jsonify({
                 'status': 'success',
                 'message': f'Cancelled {cancelled_count} order(s) for leg {leg.leg_number}',
-                'cancelled': cancelled_count
+                'cancelled': cancelled_count,
+                'leg_reset': remaining_active == 0  # Inform frontend if leg was reset
             })
         elif cancelled_count > 0:
             return jsonify({
@@ -591,7 +606,8 @@ def cancel_leg_orders(strategy_id, leg_id):
                 'message': f'Cancelled {cancelled_count} order(s), {failed_count} failed',
                 'cancelled': cancelled_count,
                 'failed': failed_count,
-                'errors': errors
+                'errors': errors,
+                'leg_reset': remaining_active == 0
             })
         else:
             return jsonify({
