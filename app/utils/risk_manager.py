@@ -283,7 +283,8 @@ class RiskManager:
 
                 entry_price = float(execution.entry_price or 0)
                 current_price = float(execution.last_price)
-                is_long = execution.transaction_type.upper() == 'BUY'
+                # Get action from leg (transaction_type doesn't exist on StrategyExecution)
+                is_long = execution.leg and execution.leg.action.upper() == 'BUY'
 
                 # Calculate trigger price based on type
                 trigger_price = None
@@ -404,8 +405,9 @@ class RiskManager:
 
             for execution in open_executions:
                 try:
-                    # Reverse transaction type for exit
-                    exit_transaction = 'SELL' if execution.transaction_type.upper() == 'BUY' else 'BUY'
+                    # Reverse transaction type for exit (get action from leg)
+                    leg_action = execution.leg.action.upper() if execution.leg else 'BUY'
+                    exit_transaction = 'SELL' if leg_action == 'BUY' else 'BUY'
 
                     # Place exit order with freeze-aware placement and retry logic
                     max_retries = 3
