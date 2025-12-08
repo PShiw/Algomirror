@@ -1586,7 +1586,8 @@ class StrategyExecutor:
         from app.models import TradingSettings
 
         # Determine if this is a next month contract
-        is_next_month = leg.expiry in ['next_month', 'next_week'] if leg.expiry else False
+        # Only 'next_month' uses the new lot size, 'next_week' still uses current lot size
+        is_next_month = leg.expiry == 'next_month' if leg.expiry else False
 
         # Try to get lot size from user's trading settings
         if self.strategy.user_id:
