@@ -1821,8 +1821,9 @@ function saveStrategy(execute = false) {
             showNotification('Strategy saved successfully', 'success');
 
             // Refresh risk status section after save to show updated parameters
+            // Use form values for immediate update (true), API will update later with P&L
             setTimeout(() => {
-                refreshRiskStatusSection();
+                refreshRiskStatusSection(true); // Use form values for immediate update
                 startRiskStatusAutoRefresh(); // Ensure auto-refresh is running
             }, 500);
 
@@ -2429,9 +2430,48 @@ function updateRiskStatusDisplay(data) {
 }
 
 // Dynamically rebuild the Risk Status section based on strategy data
-async function refreshRiskStatusSection() {
-    if (!strategyIdForRisk) return;
+async function refreshRiskStatusSection(fromFormValues = false) {
+    console.log('[Risk Status] refreshRiskStatusSection called, fromFormValues:', fromFormValues, 'strategyIdForRisk:', strategyIdForRisk);
 
+    if (!strategyIdForRisk) {
+        console.warn('[Risk Status] No strategyIdForRisk, skipping refresh');
+        return;
+    }
+
+    // If called after save, use form values for immediate UI update
+    if (fromFormValues) {
+        const useTraditional = document.getElementById('useTraditionalRisk')?.checked;
+        const useSupertrendExit = document.getElementById('useSupertrendExit')?.checked;
+
+        console.log('[Risk Status] Form values - useTraditional:', useTraditional, 'useSupertrendExit:', useSupertrendExit);
+
+        const formData = {
+            strategy_id: strategyIdForRisk,
+            max_loss: useTraditional ? (parseFloat(document.getElementById('maxLoss')?.value) || null) : null,
+            max_profit: useTraditional ? (parseFloat(document.getElementById('maxProfit')?.value) || null) : null,
+            trailing_sl: useTraditional ? (parseFloat(document.getElementById('trailingSl')?.value) || null) : null,
+            trailing_sl_type: 'percentage',
+            auto_exit_on_max_loss: useTraditional,
+            auto_exit_on_max_profit: useTraditional,
+            supertrend_exit_enabled: useSupertrendExit,
+            total_pnl: 0,
+            max_loss_pct: 0,
+            max_profit_pct: 0,
+            executions: []
+        };
+
+        console.log('[Risk Status] Constructed formData:', formData);
+
+        if (formData.max_loss || formData.max_profit || formData.trailing_sl || formData.supertrend_exit_enabled) {
+            updateRiskStatusHTML(formData);
+            console.log('[Risk Status] Updated from form values');
+        } else {
+            console.warn('[Risk Status] No risk parameters set in form, skipping update');
+        }
+        return;
+    }
+
+    // Fetch from API for real-time P&L updates
     try {
         const response = await fetch(`/trading/api/risk-status?_=${Date.now()}`);
         const result = await response.json();
@@ -2454,11 +2494,29 @@ async function refreshRiskStatusSection() {
 
 // Update or create Risk Status HTML elements dynamically
 function updateRiskStatusHTML(strategyData) {
-    const riskSection = document.getElementById('riskStatusSection');
-    if (!riskSection) return;
+    console.log('[Risk Status] updateRiskStatusHTML called with:', strategyData);
 
-    const gridContainer = riskSection.querySelector('.grid');
-    if (!gridContainer) return;
+    const riskSection = document.getElementById('riskStatusSection');
+    if (!riskSection) {
+        console.error('[Risk Status] riskStatusSection element not found!');
+        return;
+    }
+
+    // Find the grid container - it has multiple classes
+    let gridContainer = riskSection.querySelector('.grid.grid-cols-1');
+    if (!gridContainer) {
+        gridContainer = riskSection.querySelector('.grid');
+    }
+    if (!gridContainer) {
+        console.error('[Risk Status] grid container not found in riskStatusSection!');
+        // Create the grid if it doesn't exist
+        gridContainer = document.createElement('div');
+        gridContainer.className = 'grid grid-cols-1 md:grid-cols-3 gap-4';
+        riskSection.appendChild(gridContainer);
+        console.log('[Risk Status] Created new grid container');
+    }
+
+    console.log('[Risk Status] Found grid container:', gridContainer);
 
     // Build HTML for Max Loss
     let maxLossHtml = '';
