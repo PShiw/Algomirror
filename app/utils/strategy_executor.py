@@ -1178,6 +1178,14 @@ class StrategyExecutor:
                 logger.info(f"[QTY CALC DEBUG] Using pre-calculated quantity for leg {leg.leg_number}: {pre_calc_qty}")
                 return pre_calc_qty
 
+        # SEQUENTIAL EXECUTION FIX: For BUY legs, match quantity with executed SELL leg
+        # This ensures BUY CE matches SELL CE qty, and BUY PE matches SELL PE qty
+        if account and self.use_margin_calculator and leg.action == 'BUY' and leg.product_type == 'options':
+            executed_sell_qty = self._get_executed_sell_leg_quantity(leg, account)
+            if executed_sell_qty:
+                logger.info(f"[SEQ EXEC] BUY {leg.option_type} using executed SELL quantity: {executed_sell_qty}")
+                return executed_sell_qty
+
         # If margin calculator is enabled and account provided, calculate based on margin
         if self.use_margin_calculator and self.margin_calculator and account:
             logger.info(f"[QTY CALC DEBUG] Using margin calculator for {account.account_name}")
@@ -1339,6 +1347,55 @@ class StrategyExecutor:
                 logger.info(f"[SPREAD DETECT] BUY leg {current_leg.option_type} has matching SELL leg {other_leg.option_type}")
                 return True
         return False
+
+    def _get_executed_sell_leg_quantity(self, buy_leg: StrategyLeg, account: TradingAccount) -> Optional[int]:
+        """
+        Look up the quantity of an already-executed SELL leg that corresponds to this BUY leg.
+        Used for sequential execution to ensure BUY legs match SELL leg quantities.
+
+        For Iron Condor/Butterfly strategies:
+        - BUY CE should match the executed SELL CE quantity
+        - BUY PE should match the executed SELL PE quantity
+
+        Returns:
+            The quantity of the matching executed SELL leg, or None if not found
+        """
+        if buy_leg.action != 'BUY':
+            return None
+
+        # Find corresponding SELL leg in strategy (same instrument and option type)
+        all_legs = self.strategy.legs.all()
+        matching_sell_leg = None
+
+        for other_leg in all_legs:
+            if (other_leg.instrument == buy_leg.instrument and
+                other_leg.product_type == 'options' and
+                other_leg.action == 'SELL' and
+                other_leg.option_type == buy_leg.option_type and  # Same option type (CE matches CE, PE matches PE)
+                other_leg.id != buy_leg.id):
+                matching_sell_leg = other_leg
+                break
+
+        if not matching_sell_leg:
+            logger.info(f"[SEQ EXEC] No matching SELL {buy_leg.option_type} leg found for BUY {buy_leg.option_type}")
+            return None
+
+        # Look up the executed quantity for this SELL leg from StrategyExecution
+        executed = StrategyExecution.query.filter_by(
+            strategy_id=self.strategy.id,
+            account_id=account.id,
+            leg_id=matching_sell_leg.id
+        ).filter(
+            StrategyExecution.status.in_(['pending', 'entered', 'success'])
+        ).first()
+
+        if executed and executed.quantity:
+            logger.info(f"[SEQ EXEC] Found executed SELL {matching_sell_leg.option_type} leg with qty={executed.quantity}, "
+                       f"BUY {buy_leg.option_type} will use same quantity")
+            return executed.quantity
+
+        logger.info(f"[SEQ EXEC] SELL {matching_sell_leg.option_type} leg not yet executed for account {account.account_name}")
+        return None
 
     def _pre_calculate_multi_leg_quantities(self, legs: List[StrategyLeg]):
         """
