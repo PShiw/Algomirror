@@ -1,4 +1,4 @@
-# AlgoMirror - Enterprise Multi-Account OpenAlgo Management Platform
+# AlgoMirror - Single & Family Account Management Platform
 
 [![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/openflare/algomirror)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
@@ -8,7 +8,7 @@
 
 > **Enterprise-grade multi-account management platform for OpenAlgo with strategy building, risk management, and real-time analytics**
 
-AlgoMirror is a proprietary, secure, and scalable multi-account management platform developed by **OpenFlare Technologies**. It provides traders with a unified interface to manage multiple OpenAlgo trading accounts across 24 brokers, featuring advanced strategy building, Supertrend-based exits, dynamic margin calculation, and comprehensive risk management.
+AlgoMirror is a proprietary, secure, and scalable multi-account management platform. It provides traders with a unified interface to manage multiple OpenAlgo trading accounts across 25+ brokers, featuring advanced strategy building, Supertrend-based exits, dynamic margin calculation, and comprehensive risk management.
 
 ---
 
