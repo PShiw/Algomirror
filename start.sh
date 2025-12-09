@@ -10,13 +10,19 @@ source /app/.venv/bin/activate
 
 # Initialize database if not exists
 echo "[1/3] Initializing database..."
-python -c "from app import create_app, db; app = create_app(); app.app_context().push(); db.create_all(); print('Database initialized')"
+python -c "
+from app import create_app, db
+app = create_app('production')
+with app.app_context():
+    db.create_all()
+    print('Database initialized successfully')
+"
 
-# Build CSS if needed (skip in production as it should be pre-built)
-if [ ! -f /app/app/static/css/compiled.css ]; then
-    echo "[2/3] CSS not found - using pre-built styles"
-else
+# Check CSS
+if [ -f /app/app/static/css/compiled.css ]; then
     echo "[2/3] CSS compiled and ready"
+else
+    echo "[2/3] Warning: compiled.css not found - styles may not load correctly"
 fi
 
 # Start the application with gunicorn
@@ -34,4 +40,4 @@ exec gunicorn \
     --error-logfile - \
     --log-level info \
     --capture-output \
-    "app:create_app()"
+    "app:create_app('production')"
