@@ -647,7 +647,7 @@
 
                         <!-- Supertrend Exit -->
                         {% if strategy.supertrend_exit_enabled %}
-                        <div class="bg-base-100 rounded-lg p-3">
+                        <div class="bg-base-100 rounded-lg p-3" id="riskSupertrendCard">
                             <div class="flex justify-between text-sm mb-2">
                                 <span class="flex items-center gap-1">
                                     <svg class="w-4 h-4 text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2447,13 +2447,13 @@ function updateRiskStatusDisplay(data) {
     }
 
     // Update or create Supertrend exit reason display
-    const supertrendCard = document.getElementById('supertrendCard');
-    if (supertrendCard && strategyData.supertrend_exit_triggered && strategyData.supertrend_exit_reason) {
+    const riskSupertrendCard = document.getElementById('riskSupertrendCard');
+    if (riskSupertrendCard && strategyData.supertrend_exit_triggered && strategyData.supertrend_exit_reason) {
         let reasonEl = document.getElementById('riskSupertrendReason');
         if (!reasonEl) {
             // Create the reason element if it doesn't exist
-            const statusDiv = supertrendCard.querySelector('.text-sm:has(#riskSupertrendStatus)') ||
-                              supertrendCard.querySelector('div:nth-child(3)');
+            const statusDiv = riskSupertrendCard.querySelector('.text-sm:has(#riskSupertrendStatus)') ||
+                              riskSupertrendCard.querySelector('div:nth-child(3)');
             if (statusDiv) {
                 const reasonDiv = document.createElement('div');
                 reasonDiv.className = 'text-sm mt-2';
