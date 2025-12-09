@@ -8,23 +8,37 @@
         transition: opacity 0.3s ease-in-out;
     }
 
-    .tab {
-        transition: all 0.2s ease;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .tab:hover:not(.tab-active) {
-        background-color: rgba(59, 130, 246, 0.1);
-        transform: translateY(-2px);
-    }
-
-    .tab.tab-active {
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-
-    .tabs-boxed {
+    .instrument-tabs {
+        display: flex;
         gap: 0.5rem;
+        padding: 0.5rem;
+        background-color: hsl(var(--b2));
+        border-radius: 0.5rem;
+    }
+
+    .instrument-tab {
+        flex: 1;
+        padding: 0.75rem 1.5rem;
+        text-align: center;
+        font-weight: 600;
+        font-size: 1rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        background-color: transparent;
+        color: hsl(var(--bc) / 0.7);
+        border: none;
+    }
+
+    .instrument-tab:hover:not(.active) {
+        background-color: hsl(var(--b3));
+        color: hsl(var(--bc));
+    }
+
+    .instrument-tab.active {
+        background-color: hsl(var(--p));
+        color: hsl(var(--pc));
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
 
     /* Toast notification animations */
@@ -96,16 +110,10 @@
     </div>
 
     <!-- Tabs for different instruments -->
-    <div class="tabs tabs-boxed mb-6 bg-base-200 p-2">
-        <a class="tab tab-lg font-bold px-6 py-3 rounded-lg tab-active" onclick="switchTab('NIFTY', this)">
-            <span class="text-lg">NIFTY</span>
-        </a>
-        <a class="tab tab-lg font-bold px-6 py-3 rounded-lg" onclick="switchTab('BANKNIFTY', this)">
-            <span class="text-lg">BANKNIFTY</span>
-        </a>
-        <a class="tab tab-lg font-bold px-6 py-3 rounded-lg" onclick="switchTab('SENSEX', this)">
-            <span class="text-lg">SENSEX</span>
-        </a>
+    <div class="instrument-tabs mb-6">
+        <button class="instrument-tab active" onclick="switchTab('NIFTY', this)">NIFTY</button>
+        <button class="instrument-tab" onclick="switchTab('BANKNIFTY', this)">BANKNIFTY</button>
+        <button class="instrument-tab" onclick="switchTab('SENSEX', this)">SENSEX</button>
     </div>
 
     <!-- NIFTY Requirements -->
@@ -123,19 +131,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="nifty-ce-pe-sell-expiry" class="input input-bordered" value="205000" />
+                                <input type="number" id="nifty-ce-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').ce_pe_sell_expiry | default(205000) if requirements_dict.get('NIFTY') else 205000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="nifty-ce-and-pe-sell-expiry" class="input input-bordered" value="250000" />
+                                <input type="number" id="nifty-ce-and-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').ce_and_pe_sell_expiry | default(250000) if requirements_dict.get('NIFTY') else 250000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (75 Lot)</span>
                                 </label>
-                                <input type="number" id="nifty-futures-expiry" class="input input-bordered" value="215000" />
+                                <input type="number" id="nifty-futures-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').futures_expiry | default(215000) if requirements_dict.get('NIFTY') else 215000 }}" />
                             </div>
                         </div>
                     </div>
@@ -148,19 +156,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="nifty-ce-pe-sell-non-expiry" class="input input-bordered" value="250000" />
+                                <input type="number" id="nifty-ce-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').ce_pe_sell_non_expiry | default(250000) if requirements_dict.get('NIFTY') else 250000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="nifty-ce-and-pe-sell-non-expiry" class="input input-bordered" value="320000" />
+                                <input type="number" id="nifty-ce-and-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').ce_and_pe_sell_non_expiry | default(320000) if requirements_dict.get('NIFTY') else 320000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (75 Lot)</span>
                                 </label>
-                                <input type="number" id="nifty-futures-non-expiry" class="input input-bordered" value="215000" />
+                                <input type="number" id="nifty-futures-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('NIFTY').futures_non_expiry | default(215000) if requirements_dict.get('NIFTY') else 215000 }}" />
                             </div>
                         </div>
                     </div>
@@ -184,19 +192,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="banknifty-ce-pe-sell-expiry" class="input input-bordered" value="205000" />
+                                <input type="number" id="banknifty-ce-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').ce_pe_sell_expiry | default(205000) if requirements_dict.get('BANKNIFTY') else 205000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="banknifty-ce-and-pe-sell-expiry" class="input input-bordered" value="250000" />
+                                <input type="number" id="banknifty-ce-and-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').ce_and_pe_sell_expiry | default(250000) if requirements_dict.get('BANKNIFTY') else 250000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (35 Lot)</span>
                                 </label>
-                                <input type="number" id="banknifty-futures-expiry" class="input input-bordered" value="215000" />
+                                <input type="number" id="banknifty-futures-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').futures_expiry | default(215000) if requirements_dict.get('BANKNIFTY') else 215000 }}" />
                             </div>
                         </div>
                     </div>
@@ -209,19 +217,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="banknifty-ce-pe-sell-non-expiry" class="input input-bordered" value="250000" />
+                                <input type="number" id="banknifty-ce-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').ce_pe_sell_non_expiry | default(250000) if requirements_dict.get('BANKNIFTY') else 250000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="banknifty-ce-and-pe-sell-non-expiry" class="input input-bordered" value="320000" />
+                                <input type="number" id="banknifty-ce-and-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').ce_and_pe_sell_non_expiry | default(320000) if requirements_dict.get('BANKNIFTY') else 320000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (35 Lot)</span>
                                 </label>
-                                <input type="number" id="banknifty-futures-non-expiry" class="input input-bordered" value="215000" />
+                                <input type="number" id="banknifty-futures-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('BANKNIFTY').futures_non_expiry | default(215000) if requirements_dict.get('BANKNIFTY') else 215000 }}" />
                             </div>
                         </div>
                     </div>
@@ -245,19 +253,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="sensex-ce-pe-sell-expiry" class="input input-bordered" value="180000" />
+                                <input type="number" id="sensex-ce-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_ce_pe_sell_expiry | default(180000) if requirements_dict.get('SENSEX') else 180000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="sensex-ce-and-pe-sell-expiry" class="input input-bordered" value="225000" />
+                                <input type="number" id="sensex-ce-and-pe-sell-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_ce_and_pe_sell_expiry | default(225000) if requirements_dict.get('SENSEX') else 225000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (20 Lot)</span>
                                 </label>
-                                <input type="number" id="sensex-futures-expiry" class="input input-bordered" value="185000" />
+                                <input type="number" id="sensex-futures-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_futures_expiry | default(185000) if requirements_dict.get('SENSEX') else 185000 }}" />
                             </div>
                         </div>
                     </div>
@@ -270,19 +278,19 @@
                                 <label class="label">
                                     <span class="label-text">CE/PE Sell</span>
                                 </label>
-                                <input type="number" id="sensex-ce-pe-sell-non-expiry" class="input input-bordered" value="220000" />
+                                <input type="number" id="sensex-ce-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_ce_pe_sell_non_expiry | default(220000) if requirements_dict.get('SENSEX') else 220000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">CE & PE Sell (Spread)</span>
                                 </label>
-                                <input type="number" id="sensex-ce-and-pe-sell-non-expiry" class="input input-bordered" value="290000" />
+                                <input type="number" id="sensex-ce-and-pe-sell-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_ce_and_pe_sell_non_expiry | default(290000) if requirements_dict.get('SENSEX') else 290000 }}" />
                             </div>
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Futures (20 Lot)</span>
                                 </label>
-                                <input type="number" id="sensex-futures-non-expiry" class="input input-bordered" value="185000" />
+                                <input type="number" id="sensex-futures-non-expiry" class="input input-bordered" value="{{ requirements_dict.get('SENSEX').sensex_futures_non_expiry | default(185000) if requirements_dict.get('SENSEX') else 185000 }}" />
                             </div>
                         </div>
                     </div>
@@ -530,13 +538,6 @@
 <script>
     // Pure JavaScript - no template variables in JS code
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize first tab with primary colors
-        const firstTab = document.querySelector('.tab.tab-active');
-        if (firstTab) {
-            firstTab.classList.add('bg-primary');
-            firstTab.classList.add('text-primary-content');
-        }
-
         // Load margin requirements from server
         loadMarginRequirements();
     });
@@ -559,10 +560,8 @@
         });
 
         // Remove active from all tabs
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.classList.remove('tab-active');
-            tab.classList.remove('bg-primary');
-            tab.classList.remove('text-primary-content');
+        document.querySelectorAll('.instrument-tab').forEach(tab => {
+            tab.classList.remove('active');
         });
 
         // Show selected section with fade in
@@ -572,10 +571,8 @@
             selectedSection.style.opacity = '1';
         }, 10);
 
-        // Mark tab as active with enhanced styling
-        tabElement.classList.add('tab-active');
-        tabElement.classList.add('bg-primary');
-        tabElement.classList.add('text-primary-content');
+        // Mark tab as active
+        tabElement.classList.add('active');
     }
 
     // Initialize first tab with primary colors (moved to main DOMContentLoaded)

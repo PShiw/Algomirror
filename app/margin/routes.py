@@ -201,26 +201,24 @@ def requirements():
     # Convert to dict for easy template access
     qualities_dict = {q.quality_grade: q for q in trade_qualities}
 
-    # Get option buying premium values
-    option_buying_premium = 20000
-    sensex_option_buying_premium = 20000
+    # Convert requirements to dict keyed by instrument for easy template access
+    requirements_dict = {r.instrument: r for r in requirements}
 
-    nifty_req = MarginRequirement.query.filter_by(
-        user_id=current_user.id,
-        instrument='NIFTY'
-    ).first()
+    # Get option buying premium values (use model defaults as fallback)
+    option_buying_premium = MarginRequirement.DEFAULT_OPTION_BUYING_PREMIUM
+    sensex_option_buying_premium = MarginRequirement.DEFAULT_SENSEX_OPTION_BUYING_PREMIUM
+
+    nifty_req = requirements_dict.get('NIFTY')
     if nifty_req:
-        option_buying_premium = nifty_req.option_buying_premium or 20000
+        option_buying_premium = nifty_req.option_buying_premium or MarginRequirement.DEFAULT_OPTION_BUYING_PREMIUM
 
-    sensex_req = MarginRequirement.query.filter_by(
-        user_id=current_user.id,
-        instrument='SENSEX'
-    ).first()
+    sensex_req = requirements_dict.get('SENSEX')
     if sensex_req:
-        sensex_option_buying_premium = sensex_req.sensex_option_buying_premium or 20000
+        sensex_option_buying_premium = sensex_req.sensex_option_buying_premium or MarginRequirement.DEFAULT_SENSEX_OPTION_BUYING_PREMIUM
 
     return render_template('margin/requirements.html',
                          requirements=requirements,
+                         requirements_dict=requirements_dict,
                          trade_qualities=trade_qualities,
                          qualities_dict=qualities_dict,
                          option_buying_premium=option_buying_premium,
@@ -317,8 +315,8 @@ def calculator():
         for setting in settings:
             lot_sizes[setting.symbol] = setting.lot_size
 
-    # Get option buying premium from margin requirements
-    option_buying_premium = 20000  # Default value
+    # Get option buying premium from margin requirements (use model default as fallback)
+    option_buying_premium = MarginRequirement.DEFAULT_OPTION_BUYING_PREMIUM
     margin_req = MarginRequirement.query.filter_by(
         user_id=current_user.id,
         instrument='NIFTY'
@@ -383,11 +381,11 @@ def calculate_lots():
                 margin_req = calculator.margin_requirements.get(instrument)
                 if margin_req:
                     if instrument == 'SENSEX':
-                        premium_per_lot = margin_req.sensex_option_buying_premium or 20000
+                        premium_per_lot = margin_req.sensex_option_buying_premium or MarginRequirement.DEFAULT_SENSEX_OPTION_BUYING_PREMIUM
                     else:
-                        premium_per_lot = margin_req.option_buying_premium or 20000
+                        premium_per_lot = margin_req.option_buying_premium or MarginRequirement.DEFAULT_OPTION_BUYING_PREMIUM
                 else:
-                    premium_per_lot = 20000  # Default fallback
+                    premium_per_lot = MarginRequirement.DEFAULT_OPTION_BUYING_PREMIUM  # Default fallback
 
             # Calculate: effective_margin / premium_per_lot
             effective_margin = available_margin * margin_percentage

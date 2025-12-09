@@ -603,6 +603,10 @@ class TradingSettings(db.Model):
 class MarginRequirement(db.Model):
     __tablename__ = 'margin_requirements'
 
+    # Default values as class constants (for reference in other modules)
+    DEFAULT_OPTION_BUYING_PREMIUM = 20000  # Rs 20,000 per lot for NIFTY/BANKNIFTY
+    DEFAULT_SENSEX_OPTION_BUYING_PREMIUM = 20000  # Rs 20,000 per lot for SENSEX
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     instrument = db.Column(db.String(50), nullable=False)  # 'NIFTY', 'BANKNIFTY', 'SENSEX'
@@ -616,7 +620,7 @@ class MarginRequirement(db.Model):
     futures_non_expiry = db.Column(db.Float, default=215000)  # Futures on Non-Expiry
 
     # Option Buying - Premium per lot (used to calculate lot size from cash margin)
-    option_buying_premium = db.Column(db.Float, default=20000)  # Premium per lot for NIFTY/BANKNIFTY
+    option_buying_premium = db.Column(db.Float, default=DEFAULT_OPTION_BUYING_PREMIUM)  # Premium per lot for NIFTY/BANKNIFTY
 
     # SENSEX specific margins (Option Selling)
     sensex_ce_pe_sell_expiry = db.Column(db.Float, default=180000)
@@ -627,7 +631,7 @@ class MarginRequirement(db.Model):
     sensex_futures_non_expiry = db.Column(db.Float, default=185000)
 
     # SENSEX Option Buying - Premium per lot
-    sensex_option_buying_premium = db.Column(db.Float, default=20000)  # Premium per lot for SENSEX
+    sensex_option_buying_premium = db.Column(db.Float, default=DEFAULT_SENSEX_OPTION_BUYING_PREMIUM)
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

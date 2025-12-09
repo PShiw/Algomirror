@@ -142,7 +142,7 @@
                             <option value="fixed_lots" {% if strategy and strategy.risk_profile == 'fixed_lots' %}selected{% elif not strategy %}selected{% endif %}>Fixed Lot Size (Default)</option>
                             {% for quality in trade_qualities|sort(attribute='quality_grade') %}
                             <option value="grade_{{ quality.quality_grade }}" {% if strategy and strategy.risk_profile == 'grade_' ~ quality.quality_grade %}selected{% endif %}>
-                                Grade {{ quality.quality_grade }} ({{ quality.margin_percentage|int }}% margin)
+                                Grade {{ quality.quality_grade }} ({{ quality.margin_percentage|int }}%) - {{ 'Buyer' if quality.margin_source == 'cash' else 'Seller' }}
                             </option>
                             {% endfor %}
                         </select>
