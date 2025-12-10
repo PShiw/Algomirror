@@ -46,10 +46,10 @@ cp .env.example .env
 # Edit .env with appropriate values
 
 # Initialize database
-python init_db.py
+uv run init_db.py
 
 # Run application (port 8000)
-python app.py
+uv run wsgi.py
 ```
 
 #### Method 2: Using pip (Traditional)
@@ -77,20 +77,21 @@ cp .env.example .env
 python init_db.py
 
 # Run application (port 8000)
-python app.py
+python wsgi.py
 ```
 
 **Note**: UV is 10-100x faster than pip. See `UV_SETUP.md` for detailed UV usage guide.
 
 ### Database Management
 ```bash
-# Initialize fresh database
+# Using UV (recommended)
+uv run init_db.py              # Initialize fresh database
+uv run init_db.py reset        # Reset database (deletes all data)
+uv run init_db.py testdata     # Create test data (development only)
+
+# Or with activated venv
 python init_db.py
-
-# Reset database (deletes all data)
 python init_db.py reset
-
-# Create test data (development only)
 python init_db.py testdata
 
 # Database migrations

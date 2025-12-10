@@ -227,10 +227,10 @@ cp .env.example .env
 # Edit .env with your settings
 
 # Initialize database
-python init_db.py
+uv run init_db.py
 
 # Run application
-python app.py
+uv run wsgi.py
 # Application available at: http://127.0.0.1:8000
 ```
 
@@ -261,7 +261,8 @@ cp .env.example .env
 python init_db.py
 
 # Run application
-python app.py
+python wsgi.py
+# Application available at: http://127.0.0.1:8000
 ```
 
 ### First Login
@@ -817,9 +818,13 @@ curl -X POST http://127.0.0.1:5000/api/v1/ping -d '{"apikey":"test"}'
 
 **Database Issues:**
 ```bash
-python init_db.py reset  # Warning: Deletes all data
+# Using UV (recommended)
+uv run init_db.py reset  # Warning: Deletes all data
+uv run init_db.py
+
+# Or with activated venv
+python init_db.py reset
 python init_db.py
-flask db upgrade
 ```
 
 **CSS/Styling Issues:**
@@ -849,7 +854,7 @@ npm run build-css
 1. Virtual environment activated
 2. All dependencies installed
 3. CSS compiled (`npm run build-css`)
-4. Database initialized (`python init_db.py`)
+4. Database initialized (`uv run init_db.py` or `python init_db.py`)
 5. OpenAlgo server running
 6. Valid API key configured
 7. Primary account set and connected
@@ -863,12 +868,15 @@ npm run build-css
 
 ```bash
 # Initialize fresh database
-python init_db.py
+uv run init_db.py        # Using UV
+python init_db.py        # Or with activated venv
 
 # Reset database (deletes all data)
+uv run init_db.py reset
 python init_db.py reset
 
 # Create test data (development only)
+uv run init_db.py testdata
 python init_db.py testdata
 ```
 
