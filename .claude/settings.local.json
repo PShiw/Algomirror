@@ -41,7 +41,10 @@
       "Bash(.venvScriptspython.exe -m py_compile apputilsorder_status_poller.py)",
       "Bash(dir:*)",
       "Bash(.venvScriptspython.exe -c \"from config import Config; print(''DB URI:'', Config.SQLALCHEMY_DATABASE_URI)\")",
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(gh issue view:*)",
+      "WebFetch(domain:github.com)",
+      "Skill(frontend-design:frontend-design)"
     ],
     "deny": [],
     "ask": []

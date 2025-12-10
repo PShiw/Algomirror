@@ -35,72 +35,70 @@
     cursor: not-allowed !important;
 }
 
-/* Force black text in all strategy leg inputs and selects */
-.leg-item input,
-.leg-item select,
-.leg-item input:disabled,
-.leg-item select:disabled,
-.leg-item input.text-black,
-.leg-item select.text-black,
-.leg-item .input,
-.leg-item .select,
-.leg-item input[type="number"],
-.leg-item input[type="text"],
-.select.text-black,
-.input.text-black {
+/* ===== LIGHT THEME - Form styles ===== */
+[data-theme="light"] .leg-item input,
+[data-theme="light"] .leg-item select,
+[data-theme="light"] .leg-item .input,
+[data-theme="light"] .leg-item .select,
+[data-theme="light"] #strategyForm input,
+[data-theme="light"] #strategyForm select {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
-    font-weight: normal !important;
 }
 
-/* Force black text for labels */
-.leg-item .label-text {
+[data-theme="light"] .leg-item .label-text,
+[data-theme="light"] #strategyForm .label-text {
     color: #000000 !important;
-    font-weight: bold !important;
+    font-weight: 600 !important;
 }
 
-/* Override any DaisyUI default text colors */
-.leg-item .select-bordered,
-.leg-item .input-bordered {
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
-    font-weight: normal !important;
-}
-
-/* Placeholder text should be slightly lighter but still visible */
-.leg-item input::placeholder,
-.leg-item input::-webkit-input-placeholder,
-.leg-item input::-moz-placeholder,
-.leg-item input:-ms-input-placeholder {
+[data-theme="light"] .leg-item input::placeholder {
     color: #666666 !important;
     opacity: 1 !important;
-    font-weight: normal !important;
 }
 
-/* Force black text even on option elements */
-.leg-item select option {
+[data-theme="light"] .leg-item select option {
     color: #000000 !important;
-    font-weight: normal !important;
+    background: #ffffff !important;
 }
 
-/* Force black text for disabled inputs added by JavaScript */
-.leg-item .input-disabled,
-.leg-item input.input-disabled,
-.leg-item select.input-disabled,
-.input-disabled {
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
-    font-weight: normal !important;
+/* ===== DARK THEME - Form styles ===== */
+[data-theme="dark"] .leg-item input,
+[data-theme="dark"] .leg-item select,
+[data-theme="dark"] .leg-item .input,
+[data-theme="dark"] .leg-item .select,
+[data-theme="dark"] #strategyForm input,
+[data-theme="dark"] #strategyForm select {
+    color: #e8eaed !important;
+    -webkit-text-fill-color: #e8eaed !important;
+    background: #0d0e12 !important;
+    border-color: #1e222d !important;
 }
 
-/* Global override for all form elements in strategy builder */
-#strategyForm input,
-#strategyForm select,
-#strategyForm input:disabled,
-#strategyForm select:disabled {
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
-    font-weight: normal !important;
+[data-theme="dark"] .leg-item .label-text,
+[data-theme="dark"] #strategyForm .label-text {
+    color: #b2b5be !important;
+    font-weight: 600 !important;
+}
+
+[data-theme="dark"] .leg-item input::placeholder {
+    color: #6b7280 !important;
+    -webkit-text-fill-color: #6b7280 !important;
+    opacity: 1 !important;
+}
+
+[data-theme="dark"] .leg-item select option {
+    color: #e8eaed !important;
+    background: #12141a !important;
+}
+
+[data-theme="dark"] #strategyForm input:disabled,
+[data-theme="dark"] #strategyForm select:disabled,
+[data-theme="dark"] .leg-item input:disabled,
+[data-theme="dark"] .leg-item select:disabled {
+    color: #787b86 !important;
+    -webkit-text-fill-color: #787b86 !important;
+    background: #161922 !important;
 }
 </style>
 <div class="container mx-auto px-4 py-6">
@@ -127,15 +125,15 @@
                 <!-- Row 1: Strategy Name, Risk Profile, Market Condition, Product Order Type -->
                 <div class="grid gap-2 mb-2" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
                     <div class="form-control">
-                        <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Strategy Name</span></label>
-                        <input type="text" id="strategyName" class="input input-bordered input-sm text-black"
+                        <label class="label py-1"><span class="label-text text-xs font-semibold ">Strategy Name</span></label>
+                        <input type="text" id="strategyName" class="input input-bordered input-sm "
                                placeholder="e.g., Iron Condor Weekly" required
                                value="{{ strategy.name if strategy else '' }}">
                     </div>
 
                     <div class="form-control">
-                        <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Risk Profile</span></label>
-                        <select id="riskProfile" class="select select-bordered select-sm text-black" onchange="toggleLotFields()">
+                        <label class="label py-1"><span class="label-text text-xs font-semibold ">Risk Profile</span></label>
+                        <select id="riskProfile" class="select select-bordered select-sm " onchange="toggleLotFields()">
                             <option value="fixed_lots" {% if strategy and strategy.risk_profile == 'fixed_lots' %}selected{% elif not strategy %}selected{% endif %}>Fixed Lot Size (Default)</option>
                             {% for quality in trade_qualities|sort(attribute='quality_grade') %}
                             <option value="grade_{{ quality.quality_grade }}" {% if strategy and strategy.risk_profile == 'grade_' ~ quality.quality_grade %}selected{% endif %}>
@@ -146,8 +144,8 @@
                     </div>
 
                     <div class="form-control">
-                        <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Market Condition</span></label>
-                        <select id="marketCondition" class="select select-bordered select-sm text-black">
+                        <label class="label py-1"><span class="label-text text-xs font-semibold ">Market Condition</span></label>
+                        <select id="marketCondition" class="select select-bordered select-sm ">
                             <option value="non_expiry" {% if strategy and strategy.market_condition == 'non_expiry' %}selected{% endif %}>Non-Expiry</option>
                             <option value="expiry" {% if strategy and strategy.market_condition == 'expiry' %}selected{% endif %}>Expiry Day</option>
                             <option value="any" {% if strategy and strategy.market_condition == 'any' %}selected{% endif %}>Any Day</option>
@@ -155,8 +153,8 @@
                     </div>
 
                     <div class="form-control">
-                        <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Product Order Type</span></label>
-                        <select id="productOrderType" class="select select-bordered select-sm text-black">
+                        <label class="label py-1"><span class="label-text text-xs font-semibold ">Product Order Type</span></label>
+                        <select id="productOrderType" class="select select-bordered select-sm ">
                             <option value="NRML" {% if not strategy or strategy.product_order_type != 'MIS' %}selected{% endif %}>NRML (Overnight)</option>
                             <option value="MIS" {% if strategy and strategy.product_order_type == 'MIS' %}selected{% endif %}>MIS (Intraday)</option>
                         </select>
@@ -166,7 +164,7 @@
                 <!-- Row 2: Select Accounts (Horizontal) -->
                 <div class="form-control">
                     <label class="label py-1">
-                        <span class="label-text text-xs font-semibold text-black">Select Accounts</span>
+                        <span class="label-text text-xs font-semibold ">Select Accounts</span>
                         {% if accounts|length >= 2 %}
                         <span class="label-text-alt">
                             <label class="flex items-center cursor-pointer gap-1 text-primary hover:text-primary-focus">
@@ -224,22 +222,22 @@
                                    class="checkbox checkbox-primary checkbox-sm"
                                    onchange="toggleRiskManagementType('traditional')"
                                    {% if strategy and not strategy.supertrend_exit_enabled and (strategy.max_loss or strategy.max_profit or strategy.trailing_sl) %}checked{% endif %}>
-                            <span class="font-semibold text-sm text-black">Traditional</span>
+                            <span class="font-semibold text-sm ">Traditional</span>
                         </label>
                         <div class="flex gap-2" id="traditional-risk-fields">
                             <div class="form-control flex-1">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Max Loss (₹)</span></label>
-                                <input type="number" id="maxLoss" class="input input-bordered input-sm text-black"
+                                <label class="label py-0"><span class="label-text text-xs ">Max Loss (₹)</span></label>
+                                <input type="number" id="maxLoss" class="input input-bordered input-sm "
                                        placeholder="0" value="{{ strategy.max_loss if strategy else '0' }}">
                             </div>
                             <div class="form-control flex-1">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Max Profit (₹)</span></label>
-                                <input type="number" id="maxProfit" class="input input-bordered input-sm text-black"
+                                <label class="label py-0"><span class="label-text text-xs ">Max Profit (₹)</span></label>
+                                <input type="number" id="maxProfit" class="input input-bordered input-sm "
                                        placeholder="0" value="{{ strategy.max_profit if strategy else '0' }}">
                             </div>
                             <div class="form-control flex-1">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Trail SL (%)</span></label>
-                                <input type="number" id="trailingSl" class="input input-bordered input-sm text-black"
+                                <label class="label py-0"><span class="label-text text-xs ">Trail SL (%)</span></label>
+                                <input type="number" id="trailingSl" class="input input-bordered input-sm "
                                        placeholder="0" step="0.1" value="{{ strategy.trailing_sl if strategy else '0' }}">
                             </div>
                         </div>
@@ -252,19 +250,19 @@
                                    class="checkbox checkbox-primary checkbox-sm"
                                    onchange="toggleRiskManagementType('supertrend')"
                                    {% if strategy and strategy.supertrend_exit_enabled %}checked{% endif %}>
-                            <span class="font-semibold text-sm text-black">Supertrend</span>
+                            <span class="font-semibold text-sm ">Supertrend</span>
                         </label>
                         <div class="flex gap-2" id="supertrend-risk-fields">
                             <div class="form-control flex-1">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Exit Type</span></label>
-                                <select id="supertrendExitType" class="select select-bordered select-sm text-black" disabled>
+                                <label class="label py-0"><span class="label-text text-xs ">Exit Type</span></label>
+                                <select id="supertrendExitType" class="select select-bordered select-sm " disabled>
                                     <option value="breakout" {% if strategy and strategy.supertrend_exit_type == 'breakout' %}selected{% endif %}>Breakout (Net Credit)</option>
                                     <option value="breakdown" {% if strategy and strategy.supertrend_exit_type == 'breakdown' %}selected{% endif %}>Breakdown (Net Debit)</option>
                                 </select>
                             </div>
                             <div class="form-control" style="width: 80px;">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Timeframe</span></label>
-                                <select id="supertrendTimeframe" class="select select-bordered select-sm text-black" disabled>
+                                <label class="label py-0"><span class="label-text text-xs ">Timeframe</span></label>
+                                <select id="supertrendTimeframe" class="select select-bordered select-sm " disabled>
                                     <option value="3m" {% if strategy and strategy.supertrend_timeframe == '3m' %}selected{% endif %}>3m</option>
                                     <option value="5m" {% if strategy and strategy.supertrend_timeframe == '5m' %}selected{% endif %}>5m</option>
                                     <option value="10m" {% if strategy and strategy.supertrend_timeframe == '10m' %}selected{% elif not strategy %}selected{% endif %}>10m</option>
@@ -272,14 +270,14 @@
                                 </select>
                             </div>
                             <div class="form-control" style="width: 70px;">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Period</span></label>
-                                <input type="number" id="supertrendPeriod" class="input input-bordered input-sm text-black"
+                                <label class="label py-0"><span class="label-text text-xs ">Period</span></label>
+                                <input type="number" id="supertrendPeriod" class="input input-bordered input-sm "
                                        placeholder="10" min="5" max="20" disabled
                                        value="{{ strategy.supertrend_period if strategy and strategy.supertrend_period else '10' }}">
                             </div>
                             <div class="form-control" style="width: 80px;">
-                                <label class="label py-0"><span class="label-text text-xs text-black">Multiplier</span></label>
-                                <input type="number" id="supertrendMultiplier" class="input input-bordered input-sm text-black"
+                                <label class="label py-0"><span class="label-text text-xs ">Multiplier</span></label>
+                                <input type="number" id="supertrendMultiplier" class="input input-bordered input-sm "
                                        placeholder="3.0" min="1" max="10" step="0.5" disabled
                                        value="{{ strategy.supertrend_multiplier if strategy and strategy.supertrend_multiplier else '3.0' }}">
                             </div>
@@ -820,8 +818,8 @@
         <!-- Row 1 -->
         <div class="grid gap-2 mb-2" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">1. Instrument</span></label>
-                <select class="select select-bordered select-sm leg-instrument text-black">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">1. Instrument</span></label>
+                <select class="select select-bordered select-sm leg-instrument ">
                     <option value="NIFTY">NIFTY</option>
                     <option value="BANKNIFTY">BANKNIFTY</option>
                     <option value="SENSEX">SENSEX</option>
@@ -829,16 +827,16 @@
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">2. Product Type</span></label>
-                <select class="select select-bordered select-sm leg-product-type text-black" onchange="toggleOptionFields(this)">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">2. Product Type</span></label>
+                <select class="select select-bordered select-sm leg-product-type " onchange="toggleOptionFields(this)">
                     <option value="options">Options</option>
                     <option value="futures">Futures</option>
                 </select>
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">3. Expiry</span></label>
-                <select class="select select-bordered select-sm leg-expiry text-black">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">3. Expiry</span></label>
+                <select class="select select-bordered select-sm leg-expiry ">
                     <option value="current_week">Current Week</option>
                     <option value="next_week">Next Week</option>
                     <option value="current_month">Current Month</option>
@@ -847,24 +845,24 @@
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">4. Action</span></label>
-                <select class="select select-bordered select-sm leg-action text-black">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">4. Action</span></label>
+                <select class="select select-bordered select-sm leg-action ">
                     <option value="BUY">BUY</option>
                     <option value="SELL">SELL</option>
                 </select>
             </div>
 
             <div class="form-control option-field">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">5. Option Type</span></label>
-                <select class="select select-bordered select-sm leg-option-type text-black">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">5. Option Type</span></label>
+                <select class="select select-bordered select-sm leg-option-type ">
                     <option value="CE">Call (CE)</option>
                     <option value="PE">Put (PE)</option>
                 </select>
             </div>
 
             <div class="form-control option-field">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">6. Strike Selection</span></label>
-                <select class="select select-bordered select-sm leg-strike-selection text-black" onchange="toggleStrikeInput(this)">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">6. Strike Selection</span></label>
+                <select class="select select-bordered select-sm leg-strike-selection " onchange="toggleStrikeInput(this)">
                     <option value="ATM">ATM (At The Money)</option>
                     <optgroup label="In The Money">
                         <option value="ITM" data-offset="1">ITM 1</option>
@@ -919,36 +917,36 @@
         <!-- Row 2 -->
         <div class="grid gap-2" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black leg-strike-label">7. Strike Value</span></label>
-                <input type="number" class="input input-bordered input-sm leg-strike-value text-black" placeholder="Auto" disabled>
+                <label class="label py-1"><span class="label-text text-xs font-semibold  leg-strike-label">7. Strike Value</span></label>
+                <input type="number" class="input input-bordered input-sm leg-strike-value " placeholder="Auto" disabled>
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">8. Lots (Max: 100)</span></label>
-                <input type="number" class="input input-bordered input-sm leg-lots text-black" value="1" min="1" max="100">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">8. Lots (Max: 100)</span></label>
+                <input type="number" class="input input-bordered input-sm leg-lots " value="1" min="1" max="100">
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">9. Order Type</span></label>
-                <select class="select select-bordered select-sm leg-order-type text-black" onchange="togglePriceFields(this)">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">9. Order Type</span></label>
+                <select class="select select-bordered select-sm leg-order-type " onchange="togglePriceFields(this)">
                     <option value="MARKET">MARKET</option>
                     <option value="LIMIT">LIMIT</option>
                 </select>
             </div>
 
             <div class="form-control limit-price-field" style="display:none;">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Limit Price</span></label>
-                <input type="number" class="input input-bordered input-sm leg-limit-price text-black" placeholder="0.00" step="0.05">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">Limit Price</span></label>
+                <input type="number" class="input input-bordered input-sm leg-limit-price " placeholder="0.00" step="0.05">
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Stop Loss (%)</span></label>
-                <input type="number" class="input input-bordered input-sm leg-sl text-black" placeholder="%" step="0.1">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">Stop Loss (%)</span></label>
+                <input type="number" class="input input-bordered input-sm leg-sl " placeholder="%" step="0.1">
             </div>
 
             <div class="form-control">
-                <label class="label py-1"><span class="label-text text-xs font-semibold text-black">Take Profit (%)</span></label>
-                <input type="number" class="input input-bordered input-sm leg-tp text-black" placeholder="%" step="0.1">
+                <label class="label py-1"><span class="label-text text-xs font-semibold ">Take Profit (%)</span></label>
+                <input type="number" class="input input-bordered input-sm leg-tp " placeholder="%" step="0.1">
             </div>
         </div>
     </div>

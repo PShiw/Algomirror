@@ -1,9 +1,9 @@
 // Theme management for AlgoMirror
 (function() {
     'use strict';
-    
-    const THEME_KEY = 'algomirror-theme';
-    const DEFAULT_THEME = 'light';
+
+    const THEME_KEY = 'theme';  // Must match base.html
+    const DEFAULT_THEME = 'dark';
     
     // Available themes
     const themes = {

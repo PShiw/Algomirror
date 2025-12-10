@@ -2,7 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles for AlgoMirror */
+/* ============================================
+   GOOGLE FONTS - JetBrains Mono for Terminal
+   ============================================ */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
 
 /* Animation utilities */
 .animate-out {
@@ -18,23 +25,6 @@
     opacity: 0;
     transform: translateX(100%);
   }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-base-300/50;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-base-content/30 rounded;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-base-content/50;
 }
 
 /* Loading spinner */
@@ -87,7 +77,7 @@
 
 /* Typography */
 .font-mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Monaco, Consolas, monospace;
 }
 
 /* Gradient backgrounds */
@@ -117,11 +107,11 @@
   .stats {
     @apply grid-cols-1;
   }
-  
+
   .stats .stat {
     @apply place-items-center text-center;
   }
-  
+
   .navbar-center {
     @apply hidden;
   }
@@ -136,7 +126,7 @@
   .dropdown {
     @apply hidden !important;
   }
-  
+
   .drawer-content {
     @apply ml-0 !important;
   }
@@ -155,7 +145,7 @@
   .card {
     @apply border border-base-content;
   }
-  
+
   .btn {
     @apply border-2 border-current;
   }
@@ -169,4 +159,528 @@
 /* Hero gradient overlay */
 .hero-overlay {
   @apply bg-gradient-to-b from-transparent via-base-100/50 to-base-100;
+}
+
+/* ============================================
+   DARK THEME - TRADING TERMINAL STYLES
+   ============================================ */
+
+/* Custom scrollbar - Dark Terminal */
+[data-theme="dark"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #0d0e12;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #1e222d;
+  border-radius: 3px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #363a45;
+}
+
+/* Light theme scrollbar */
+[data-theme="light"] ::-webkit-scrollbar {
+  width: 8px;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-track {
+  @apply bg-base-300/50;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  @apply bg-base-content/30 rounded;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  @apply bg-base-content/50;
+}
+
+/* Terminal Grid Background */
+[data-theme="dark"] body {
+  background-color: #0d0e12;
+  background-image:
+    linear-gradient(rgba(30, 34, 45, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 34, 45, 0.3) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: -1px -1px;
+}
+
+/* Subtle noise texture overlay for depth */
+[data-theme="dark"] body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.015;
+  z-index: 9999;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Cards - Terminal Panel Style */
+[data-theme="dark"] .card {
+  background: linear-gradient(180deg, #161922 0%, #12141a 100%);
+  border: 1px solid #1e222d;
+  box-shadow:
+    0 0 0 1px rgba(30, 34, 45, 0.5),
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="dark"] .card:hover {
+  transform: translateY(-1px);
+  border-color: #363a45;
+  box-shadow:
+    0 0 0 1px rgba(54, 58, 69, 0.8),
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Card header accent line */
+[data-theme="dark"] .card-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, #00d4ff 0%, #00d4ff80 100%);
+  border-radius: 0 2px 2px 0;
+}
+
+[data-theme="dark"] .card-title {
+  position: relative;
+  padding-left: 12px;
+}
+
+/* Navbar - Terminal Header */
+[data-theme="dark"] .navbar {
+  background: linear-gradient(180deg, #12141a 0%, #0d0e12 100%);
+  border-bottom: 1px solid #1e222d;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Sidebar - Terminal Drawer */
+[data-theme="dark"] .drawer-side .menu {
+  background: linear-gradient(180deg, #0d0e12 0%, #0a0a0c 100%);
+  border-right: 1px solid #1e222d;
+}
+
+[data-theme="dark"] .menu li > a:hover,
+[data-theme="dark"] .menu li > button:hover {
+  background: rgba(0, 212, 255, 0.08);
+  border-left: 2px solid #00d4ff;
+}
+
+[data-theme="dark"] .menu li > a.active,
+[data-theme="dark"] .menu li > button.active {
+  background: rgba(0, 212, 255, 0.12);
+  border-left: 2px solid #00d4ff;
+  color: #00d4ff;
+}
+
+/* Buttons - Terminal Style */
+[data-theme="dark"] .btn-primary {
+  background: linear-gradient(180deg, #00d4ff 0%, #00b8e6 100%);
+  border: none;
+  box-shadow:
+    0 0 20px rgba(0, 212, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .btn-primary:hover {
+  background: linear-gradient(180deg, #33ddff 0%, #00d4ff 100%);
+  box-shadow:
+    0 0 30px rgba(0, 212, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="dark"] .btn-ghost {
+  color: #b2b5be;
+}
+
+[data-theme="dark"] .btn-ghost:hover {
+  background: rgba(0, 212, 255, 0.08);
+  color: #00d4ff;
+}
+
+[data-theme="dark"] .btn-outline {
+  border-color: #1e222d;
+  color: #b2b5be;
+}
+
+[data-theme="dark"] .btn-outline:hover {
+  border-color: #00d4ff;
+  background: rgba(0, 212, 255, 0.1);
+  color: #00d4ff;
+}
+
+/* Form Inputs - Terminal Style */
+[data-theme="dark"] .input,
+[data-theme="dark"] .select,
+[data-theme="dark"] .textarea {
+  background: #0d0e12;
+  border: 1px solid #1e222d;
+  color: #e8eaed;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+[data-theme="dark"] .input:focus,
+[data-theme="dark"] .select:focus,
+[data-theme="dark"] .textarea:focus {
+  border-color: #00d4ff;
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
+  outline: none;
+}
+
+[data-theme="dark"] .input::placeholder {
+  color: #6b7280;
+}
+
+/* Select dropdown text */
+[data-theme="dark"] .select option {
+  background: #12141a;
+  color: #e8eaed;
+}
+
+/* Labels */
+[data-theme="dark"] label,
+[data-theme="dark"] .label,
+[data-theme="dark"] .label-text {
+  color: #b2b5be;
+}
+
+[data-theme="dark"] .label-text-alt {
+  color: #787b86;
+}
+
+/* Form control text */
+[data-theme="dark"] .form-control {
+  color: #e8eaed;
+}
+
+/* Radio and Checkbox labels */
+[data-theme="dark"] .radio + span,
+[data-theme="dark"] .checkbox + span {
+  color: #d1d4dc;
+}
+
+/* Radio buttons */
+[data-theme="dark"] .radio {
+  border-color: #363a45;
+}
+
+[data-theme="dark"] .radio:checked {
+  border-color: #00d4ff;
+  background-color: #00d4ff;
+}
+
+/* Tables - Terminal Data Grid */
+[data-theme="dark"] .table {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+}
+
+[data-theme="dark"] .table thead {
+  background: #0d0e12;
+  border-bottom: 1px solid #1e222d;
+}
+
+[data-theme="dark"] .table thead th {
+  color: #787b86;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 12px 16px;
+}
+
+[data-theme="dark"] .table tbody tr {
+  border-bottom: 1px solid rgba(30, 34, 45, 0.5);
+  transition: background 0.15s ease;
+}
+
+[data-theme="dark"] .table tbody tr:hover {
+  background: rgba(0, 212, 255, 0.04);
+}
+
+[data-theme="dark"] .table tbody td {
+  padding: 12px 16px;
+  color: #b2b5be;
+}
+
+/* Stats - Terminal Metrics */
+[data-theme="dark"] .stats {
+  background: linear-gradient(180deg, #161922 0%, #12141a 100%);
+  border: 1px solid #1e222d;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .stat {
+  border-color: #1e222d;
+}
+
+[data-theme="dark"] .stat-title {
+  color: #787b86;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+[data-theme="dark"] .stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  color: #d1d4dc;
+}
+
+/* Badges - Terminal Labels */
+[data-theme="dark"] .badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+[data-theme="dark"] .badge-success {
+  background: rgba(38, 166, 154, 0.15);
+  border: 1px solid rgba(38, 166, 154, 0.3);
+  color: #26a69a;
+}
+
+[data-theme="dark"] .badge-error {
+  background: rgba(239, 83, 80, 0.15);
+  border: 1px solid rgba(239, 83, 80, 0.3);
+  color: #ef5350;
+}
+
+[data-theme="dark"] .badge-warning {
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  color: #ff9800;
+}
+
+[data-theme="dark"] .badge-info {
+  background: rgba(33, 150, 243, 0.15);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  color: #2196f3;
+}
+
+[data-theme="dark"] .badge-primary {
+  background: rgba(0, 212, 255, 0.15);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  color: #00d4ff;
+}
+
+/* Alerts - Terminal Notifications */
+[data-theme="dark"] .alert {
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid;
+}
+
+[data-theme="dark"] .alert-success {
+  background: rgba(38, 166, 154, 0.1);
+  border-color: rgba(38, 166, 154, 0.3);
+  color: #26a69a;
+}
+
+[data-theme="dark"] .alert-error {
+  background: rgba(239, 83, 80, 0.1);
+  border-color: rgba(239, 83, 80, 0.3);
+  color: #ef5350;
+}
+
+[data-theme="dark"] .alert-warning {
+  background: rgba(255, 152, 0, 0.1);
+  border-color: rgba(255, 152, 0, 0.3);
+  color: #ff9800;
+}
+
+[data-theme="dark"] .alert-info {
+  background: rgba(33, 150, 243, 0.1);
+  border-color: rgba(33, 150, 243, 0.3);
+  color: #2196f3;
+}
+
+/* Dropdown - Terminal Menu */
+[data-theme="dark"] .dropdown-content {
+  background: #12141a;
+  border: 1px solid #1e222d;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .dropdown-content li > a:hover,
+[data-theme="dark"] .dropdown-content li > button:hover {
+  background: rgba(0, 212, 255, 0.08);
+}
+
+/* Modal - Terminal Dialog */
+[data-theme="dark"] .modal-box {
+  background: linear-gradient(180deg, #161922 0%, #12141a 100%);
+  border: 1px solid #1e222d;
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .modal-backdrop {
+  background: rgba(10, 10, 12, 0.85);
+  backdrop-filter: blur(4px);
+}
+
+/* Tabs - Terminal Navigation */
+[data-theme="dark"] .tabs-boxed {
+  background: #0d0e12;
+  border: 1px solid #1e222d;
+}
+
+[data-theme="dark"] .tab {
+  color: #787b86;
+}
+
+[data-theme="dark"] .tab:hover {
+  color: #b2b5be;
+}
+
+[data-theme="dark"] .tab-active {
+  background: rgba(0, 212, 255, 0.1) !important;
+  color: #00d4ff !important;
+  border-bottom: 2px solid #00d4ff;
+}
+
+/* Progress - Terminal Loading */
+[data-theme="dark"] .progress {
+  background: #1e222d;
+}
+
+[data-theme="dark"] .progress-primary::-webkit-progress-value {
+  background: linear-gradient(90deg, #00d4ff, #00b8e6);
+}
+
+/* Tooltip - Terminal Hint */
+[data-theme="dark"] .tooltip::before {
+  background: #161922;
+  border: 1px solid #1e222d;
+  color: #d1d4dc;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+/* Footer - Terminal Footer */
+[data-theme="dark"] footer {
+  background: #0d0e12;
+  border-top: 1px solid #1e222d;
+}
+
+/* Trading-specific styles */
+[data-theme="dark"] .profit-text {
+  color: #26a69a;
+  text-shadow: 0 0 8px rgba(38, 166, 154, 0.3);
+}
+
+[data-theme="dark"] .loss-text {
+  color: #ef5350;
+  text-shadow: 0 0 8px rgba(239, 83, 80, 0.3);
+}
+
+[data-theme="dark"] .profit-bg {
+  background: rgba(38, 166, 154, 0.1);
+  border-left: 3px solid #26a69a;
+}
+
+[data-theme="dark"] .loss-bg {
+  background: rgba(239, 83, 80, 0.1);
+  border-left: 3px solid #ef5350;
+}
+
+/* Live indicator pulse */
+[data-theme="dark"] .live-indicator {
+  position: relative;
+}
+
+[data-theme="dark"] .live-indicator::before {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #26a69a;
+  border-radius: 50%;
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.5);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 0 8px rgba(38, 166, 154, 0);
+  }
+}
+
+/* Account card enhancements for dark theme */
+[data-theme="dark"] .account-card {
+  background: linear-gradient(180deg, #161922 0%, #12141a 100%);
+  border: 1px solid #1e222d;
+}
+
+[data-theme="dark"] .account-card.primary {
+  border-color: #00d4ff;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.1);
+}
+
+[data-theme="dark"] .account-card:hover {
+  border-color: #363a45;
+}
+
+/* Monospace data display */
+[data-theme="dark"] .data-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Divider styling */
+[data-theme="dark"] .divider::before,
+[data-theme="dark"] .divider::after {
+  background: #1e222d;
+}
+
+/* Checkbox and Toggle */
+[data-theme="dark"] .checkbox:checked,
+[data-theme="dark"] .toggle:checked {
+  background-color: #00d4ff;
+  border-color: #00d4ff;
+}
+
+/* Hero section for dark theme */
+[data-theme="dark"] .hero {
+  background: linear-gradient(180deg, #0d0e12 0%, #12141a 100%);
+}
+
+/* Skeleton loading for dark theme */
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, #1e222d 25%, #363a45 50%, #1e222d 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Link hover effect for dark theme */
+[data-theme="dark"] .link-primary {
+  color: #00d4ff;
+}
+
+[data-theme="dark"] .link-primary:hover {
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
 }
