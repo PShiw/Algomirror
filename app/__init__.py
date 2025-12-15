@@ -289,8 +289,9 @@ def create_app(config_name=None):
                     app.logger.debug(f"Ping response: {ping_response}")
 
                     if ping_response.get('status') == 'success':
-                        app.logger.debug(f"Authentication successful, starting option chains in background")
-                        # Start option chains in a background thread to avoid blocking worker startup
+                        app.logger.debug(f"Authentication successful, starting essential services in background")
+                        # Start position monitor and risk manager (NOT option chains)
+                        # Option chains load on-demand only when user visits the page
                         import threading
                         def delayed_start(flask_app, primary_acct):
                             import time
@@ -299,7 +300,7 @@ def create_app(config_name=None):
                                 with flask_app.app_context():
                                     option_chain_service.on_primary_account_connected(primary_acct)
                             except Exception as e:
-                                flask_app.logger.error(f"Error starting option chains: {e}")
+                                flask_app.logger.error(f"Error starting services: {e}")
                         threading.Thread(target=delayed_start, args=(app, primary), daemon=True).start()
                     else:
                         # Authentication failed - update connection status
@@ -314,8 +315,8 @@ def create_app(config_name=None):
                     primary.connection_status = 'disconnected'
                     db.session.commit()
             else:
-                app.logger.debug(f"Primary account {primary.account_name} status is '{primary.connection_status}', not starting option chains")
+                app.logger.debug(f"Primary account {primary.account_name} status is '{primary.connection_status}', not starting services")
 
-    app.logger.debug('Option chain background service started', extra={'event': 'service_init'})
+    app.logger.debug('Background service initialized (option chains load on-demand)', extra={'event': 'service_init'})
     
     return app

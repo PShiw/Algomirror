@@ -826,10 +826,19 @@ class OptionChainBackgroundService:
     def on_special_session_start(self, session_name: str):
         """Called when a special trading session starts"""
         logger.debug(f"Special session started: {session_name}")
+        # DISABLED: Option chains now load on-demand only when user visits the page
+        # if self.primary_account:
+        #     self.start_option_chain('NIFTY')
+        #     self.start_option_chain('BANKNIFTY')
+        #     self.start_option_chain('SENSEX')
+
+        # Only start essential services (position monitor and risk manager)
         if self.primary_account:
-            self.start_option_chain('NIFTY')
-            self.start_option_chain('BANKNIFTY')
-            self.start_option_chain('SENSEX')
+            if self.flask_app:
+                with self.flask_app.app_context():
+                    self.start_position_monitor()
+                    self.start_risk_manager()
+                    logger.debug("Special session: Position monitor and risk manager started")
     
     def on_special_session_end(self, session_name: str):
         """Called when a special trading session ends"""

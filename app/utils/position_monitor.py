@@ -158,14 +158,19 @@ class PositionMonitor:
 
     def get_open_positions(self) -> List[StrategyExecution]:
         """
-        Get all open positions from database.
+        Get open positions that need WebSocket monitoring.
+
+        Only returns positions where risk management is configured:
+        - Leg-level: stop_loss_value or take_profit_value on StrategyLeg
+        - Strategy-level: max_loss or max_profit on Strategy
 
         Filters:
         - status='entered'
         - broker_order_status NOT IN ['rejected', 'cancelled']
+        - Has SL/TP configured at leg or strategy level
 
         Returns:
-            List[StrategyExecution]: List of open position executions
+            List[StrategyExecution]: List of open position executions with risk management
         """
         try:
             # Query for entered positions
@@ -173,7 +178,7 @@ class PositionMonitor:
                 StrategyExecution.status == 'entered'
             ).all()
 
-            # Filter out rejected/cancelled orders
+            # Filter out rejected/cancelled orders and positions without risk management
             filtered_executions = []
             for execution in open_executions:
                 # Check if broker_order_status exists and is not rejected/cancelled
@@ -181,9 +186,34 @@ class PositionMonitor:
                     if execution.broker_order_status.lower() in ['rejected', 'cancelled']:
                         continue
 
-                filtered_executions.append(execution)
+                # Check leg-level risk management (StrategyLeg)
+                leg = execution.leg
+                has_leg_sl = False
+                has_leg_tp = False
+                if leg:
+                    has_leg_sl = leg.stop_loss_value is not None and leg.stop_loss_value > 0
+                    has_leg_tp = leg.take_profit_value is not None and leg.take_profit_value > 0
 
-            logger.debug(f"Found {len(filtered_executions)} open positions to monitor")
+                # Check strategy-level risk management (Strategy)
+                strategy = execution.strategy
+                has_strategy_sl = False
+                has_strategy_tp = False
+                if strategy:
+                    has_strategy_sl = strategy.max_loss is not None and strategy.max_loss > 0
+                    has_strategy_tp = strategy.max_profit is not None and strategy.max_profit > 0
+
+                # Include if ANY risk management is configured
+                if has_leg_sl or has_leg_tp or has_strategy_sl or has_strategy_tp:
+                    filtered_executions.append(execution)
+                    logger.debug(f"Position {execution.symbol} has risk management "
+                               f"(Leg SL={leg.stop_loss_value if leg else None}, "
+                               f"Leg TP={leg.take_profit_value if leg else None}, "
+                               f"Strategy SL={strategy.max_loss if strategy else None}, "
+                               f"Strategy TP={strategy.max_profit if strategy else None})")
+                else:
+                    logger.debug(f"Skipping {execution.symbol} - no risk management configured")
+
+            logger.debug(f"Found {len(filtered_executions)} positions with risk management to monitor")
             return filtered_executions
 
         except Exception as e:
@@ -286,13 +316,34 @@ class PositionMonitor:
     def on_order_filled(self, execution: StrategyExecution):
         """
         Called by OrderStatusPoller when an order fills.
-        Adds the position to monitoring.
+        Only subscribes to WebSocket if risk management (SL/TP) is configured.
 
         Args:
             execution: The filled strategy execution
         """
         if not self.is_running:
             logger.debug("Monitor not running - ignoring order fill")
+            return
+
+        # Check leg-level risk management (StrategyLeg)
+        leg = execution.leg
+        has_leg_sl = False
+        has_leg_tp = False
+        if leg:
+            has_leg_sl = leg.stop_loss_value is not None and leg.stop_loss_value > 0
+            has_leg_tp = leg.take_profit_value is not None and leg.take_profit_value > 0
+
+        # Check strategy-level risk management (Strategy)
+        strategy = execution.strategy
+        has_strategy_sl = False
+        has_strategy_tp = False
+        if strategy:
+            has_strategy_sl = strategy.max_loss is not None and strategy.max_loss > 0
+            has_strategy_tp = strategy.max_profit is not None and strategy.max_profit > 0
+
+        # Only subscribe if ANY risk management is configured
+        if not (has_leg_sl or has_leg_tp or has_strategy_sl or has_strategy_tp):
+            logger.debug(f"Order filled for {execution.symbol} but no risk management configured - skipping WebSocket subscription")
             return
 
         key = f"{execution.symbol}_{execution.exchange}"
@@ -305,7 +356,7 @@ class PositionMonitor:
             logger.debug(f"Added {execution.symbol} to existing monitoring")
             return
 
-        # Subscribe to new symbol
+        # Subscribe to new symbol (only if risk management is configured)
         try:
             if self.websocket_manager:
                 self.websocket_manager.subscribe({
@@ -317,7 +368,7 @@ class PositionMonitor:
                 self.subscribed_symbols.add(key)
                 self.position_map[key] = [execution]
 
-                logger.debug(f"New position filled - subscribed to {execution.symbol}")
+                logger.debug(f"New position filled with risk management - subscribed to {execution.symbol}")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to new position {execution.symbol}: {e}")
@@ -340,27 +391,59 @@ class PositionMonitor:
         Args:
             execution: The closed strategy execution
         """
-        key = f"{execution.symbol}_{execution.exchange}"
+        try:
+            key = f"{execution.symbol}_{execution.exchange}"
 
-        if key not in self.position_map:
-            return
+            logger.info(f"[POSITION_CLOSE] Received notification for {execution.symbol} (execution_id={execution.id})")
+            logger.info(f"[POSITION_CLOSE] Currently subscribed symbols: {list(self.subscribed_symbols)}")
 
-        # Remove from position map
-        positions = self.position_map[key]
-        if execution in positions:
-            positions.remove(execution)
+            # Remove from position map by ID (not object identity)
+            if key in self.position_map:
+                positions = self.position_map[key]
+                # Remove by ID since object instances may differ
+                self.position_map[key] = [p for p in positions if p.id != execution.id]
+                remaining = len(self.position_map[key])
+                logger.info(f"[POSITION_CLOSE] Removed execution {execution.id} from position map, {remaining} remaining")
 
-        # If no more positions for this symbol, unsubscribe
-        if not positions:
-            self.unsubscribe_from_symbol(execution.symbol, execution.exchange)
-            logger.debug(
-                f"No more positions for {execution.symbol} - unsubscribed"
-            )
-        else:
-            logger.debug(
-                f"Position closed for {execution.symbol} - "
-                f"{len(positions)} positions remaining"
-            )
+                # If no more positions in our map, remove the key
+                if remaining == 0:
+                    self.position_map.pop(key, None)
+
+            # Query database to check if ANY open positions remain for this symbol
+            # This is the source of truth, not our in-memory map
+            remaining_positions = StrategyExecution.query.filter(
+                StrategyExecution.symbol == execution.symbol,
+                StrategyExecution.exchange == execution.exchange,
+                StrategyExecution.status == 'entered'
+            ).count()
+
+            logger.info(f"[POSITION_CLOSE] Database shows {remaining_positions} remaining open positions for {execution.symbol}")
+
+            if remaining_positions == 0:
+                # No more open positions - unsubscribe from WebSocket
+                logger.info(f"[POSITION_CLOSE] No more open positions - unsubscribing from {execution.symbol}")
+
+                # Force unsubscribe regardless of internal tracking
+                if key in self.subscribed_symbols:
+                    self.unsubscribe_from_symbol(execution.symbol, execution.exchange)
+                    logger.info(f"[POSITION_CLOSE] Unsubscribed {execution.symbol} from WebSocket")
+                else:
+                    # Still try to unsubscribe even if not in our tracking (defensive)
+                    logger.warning(f"[POSITION_CLOSE] {execution.symbol} not in subscribed_symbols but trying to unsubscribe anyway")
+                    if self.websocket_manager:
+                        try:
+                            self.websocket_manager.unsubscribe({
+                                'symbol': execution.symbol,
+                                'exchange': execution.exchange
+                            })
+                            logger.info(f"[POSITION_CLOSE] Force-unsubscribed {execution.symbol}")
+                        except Exception as unsub_error:
+                            logger.error(f"[POSITION_CLOSE] Force-unsubscribe failed: {unsub_error}")
+            else:
+                logger.info(f"[POSITION_CLOSE] Position closed for {execution.symbol} - {remaining_positions} positions still open")
+
+        except Exception as e:
+            logger.error(f"[POSITION_CLOSE] Error processing position close: {e}", exc_info=True)
 
     def update_last_price(self, symbol: str, exchange: str, ltp: float):
         """
