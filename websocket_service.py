@@ -23,8 +23,9 @@ import time
 import signal
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, time as dt_time, timedelta
 from pathlib import Path
+import pytz
 
 # Add the app directory to path
 app_dir = Path(__file__).parent.resolve()
@@ -76,11 +77,216 @@ class StandaloneWebSocketService:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        # Trading hours from database (will be loaded dynamically)
+        self.ist = pytz.timezone('Asia/Kolkata')
+        self.cached_sessions = []
+        self.cached_holidays = {}
+        self.cached_special_sessions = {}
+        self.cache_refresh_time = None
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         logger.info(f"Received signal {signum}, shutting down...")
         self._shutdown = True
         self.stop()
+
+    def refresh_trading_hours_cache(self):
+        """Load trading hours from database into cache"""
+        try:
+            from app import create_app, db
+            from app.models import TradingSession, MarketHoliday, SpecialTradingSession
+            from sqlalchemy import and_
+            from datetime import date
+
+            app = create_app()
+            with app.app_context():
+                now = datetime.now(self.ist)
+                year_start = date(now.year, 1, 1)
+                year_end = date(now.year, 12, 31)
+
+                # Cache regular trading sessions
+                sessions = TradingSession.query.filter_by(is_active=True).all()
+                self.cached_sessions = []
+                for session in sessions:
+                    self.cached_sessions.append({
+                        'day_of_week': session.day_of_week,
+                        'start_time': session.start_time,
+                        'end_time': session.end_time,
+                        'is_active': session.is_active
+                    })
+
+                # Cache holidays
+                holidays = MarketHoliday.query.filter(
+                    and_(
+                        MarketHoliday.holiday_date >= year_start,
+                        MarketHoliday.holiday_date <= year_end
+                    )
+                ).all()
+
+                self.cached_holidays = {}
+                for holiday in holidays:
+                    self.cached_holidays[holiday.holiday_date] = {
+                        'holiday_name': holiday.holiday_name,
+                        'is_special_session': holiday.is_special_session
+                    }
+
+                # Cache special sessions
+                special_sessions = SpecialTradingSession.query.filter(
+                    and_(
+                        SpecialTradingSession.session_date >= year_start,
+                        SpecialTradingSession.session_date <= year_end,
+                        SpecialTradingSession.is_active == True
+                    )
+                ).all()
+
+                self.cached_special_sessions = {}
+                for session in special_sessions:
+                    if session.session_date not in self.cached_special_sessions:
+                        self.cached_special_sessions[session.session_date] = []
+                    self.cached_special_sessions[session.session_date].append({
+                        'session_name': session.session_name,
+                        'start_time': session.start_time,
+                        'end_time': session.end_time
+                    })
+
+                self.cache_refresh_time = datetime.now(self.ist)
+                logger.info(f"Trading hours cache refreshed: {len(self.cached_sessions)} sessions, "
+                          f"{len(self.cached_holidays)} holidays, "
+                          f"{len(self.cached_special_sessions)} special sessions")
+
+        except Exception as e:
+            logger.error(f"Failed to refresh trading hours cache: {e}")
+            # Use default NSE hours as fallback
+            self._set_default_cache()
+
+    def _set_default_cache(self):
+        """Set default NSE trading hours if database not available"""
+        logger.warning("Using default NSE trading hours (database unavailable)")
+        self.cached_sessions = [
+            {'day_of_week': i, 'start_time': dt_time(9, 15), 'end_time': dt_time(15, 30), 'is_active': True}
+            for i in range(5)  # Monday to Friday
+        ]
+        self.cached_holidays = {}
+        self.cached_special_sessions = {}
+
+    def is_trading_hours(self) -> bool:
+        """
+        Check if current time is within trading hours based on database settings.
+        Includes 15-minute pre-market buffer for WebSocket startup.
+        """
+        try:
+            now = datetime.now(self.ist)
+            current_day = now.weekday()  # 0=Monday, 6=Sunday
+            current_time = now.time()
+            current_date = now.date()
+
+            # Refresh cache if needed (once per day at 5 AM)
+            if (self.cache_refresh_time is None or
+                (now.hour == 5 and now.minute < 5 and
+                 (self.cache_refresh_time.date() != current_date))):
+                self.refresh_trading_hours_cache()
+
+            # If no cached sessions, use defaults
+            if not self.cached_sessions:
+                self._set_default_cache()
+
+            # Check for special trading session first (e.g., Muhurat trading)
+            if current_date in self.cached_special_sessions:
+                for session in self.cached_special_sessions[current_date]:
+                    # Include 15-minute pre-market buffer
+                    pre_market = (datetime.combine(current_date, session['start_time']) - timedelta(minutes=15)).time()
+                    if pre_market <= current_time <= session['end_time']:
+                        logger.debug(f"Special session active: {session['session_name']}")
+                        return True
+
+            # Check if it's a holiday (without special session)
+            if current_date in self.cached_holidays:
+                holiday_info = self.cached_holidays[current_date]
+                if not holiday_info.get('is_special_session', False):
+                    logger.debug(f"Market holiday: {holiday_info.get('holiday_name', 'Unknown')}")
+                    return False
+
+            # Check regular trading sessions for current day
+            for session in self.cached_sessions:
+                if session['day_of_week'] == current_day and session['is_active']:
+                    # Include 15-minute pre-market buffer
+                    pre_market = (datetime.combine(current_date, session['start_time']) - timedelta(minutes=15)).time()
+                    if pre_market <= current_time <= session['end_time']:
+                        return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking trading hours: {e}")
+            return False
+
+    def get_time_until_market_open(self) -> int:
+        """
+        Calculate seconds until next market open based on database settings.
+        Returns seconds to wait before next trading session.
+        """
+        try:
+            now = datetime.now(self.ist)
+            current_day = now.weekday()
+            current_time = now.time()
+            current_date = now.date()
+
+            # Ensure cache is loaded
+            if not self.cached_sessions:
+                self.refresh_trading_hours_cache()
+                if not self.cached_sessions:
+                    self._set_default_cache()
+
+            # Get trading days from cached sessions
+            trading_days = set(s['day_of_week'] for s in self.cached_sessions if s['is_active'])
+
+            # Find session for current day
+            current_session = None
+            for session in self.cached_sessions:
+                if session['day_of_week'] == current_day and session['is_active']:
+                    current_session = session
+                    break
+
+            # If it's a trading day and before market open (with 15-min buffer)
+            if current_session:
+                pre_market = (datetime.combine(current_date, current_session['start_time']) - timedelta(minutes=15)).time()
+                if current_time < pre_market:
+                    # Check if today is a holiday
+                    if current_date not in self.cached_holidays or \
+                       self.cached_holidays[current_date].get('is_special_session', False):
+                        # Market opens today
+                        market_open_today = now.replace(
+                            hour=pre_market.hour,
+                            minute=pre_market.minute,
+                            second=0,
+                            microsecond=0
+                        )
+                        return int((market_open_today - now).total_seconds())
+
+            # Find next trading day
+            for i in range(1, 8):
+                next_day = (current_day + i) % 7
+                next_date = current_date + timedelta(days=i)
+
+                # Skip holidays
+                if next_date in self.cached_holidays and \
+                   not self.cached_holidays[next_date].get('is_special_session', False):
+                    continue
+
+                # Find session for next day
+                for session in self.cached_sessions:
+                    if session['day_of_week'] == next_day and session['is_active']:
+                        pre_market = (datetime.combine(next_date, session['start_time']) - timedelta(minutes=15)).time()
+                        next_market_open = datetime.combine(next_date, pre_market)
+                        next_market_open = self.ist.localize(next_market_open)
+                        return int((next_market_open - now).total_seconds())
+
+            # Fallback: wait 1 hour and check again
+            return 3600
+
+        except Exception as e:
+            logger.error(f"Error calculating time until market open: {e}")
+            return 3600  # Default to 1 hour
 
     def load_config_from_db(self):
         """Load WebSocket configuration from database"""
@@ -411,40 +617,93 @@ class StandaloneWebSocketService:
             logger.error(f"Error triggering exit: {e}")
 
     def run(self):
-        """Main service loop"""
+        """Main service loop with trading hours awareness"""
         logger.info("Starting WebSocket Service...")
+
+        # Load trading hours cache first
+        self.refresh_trading_hours_cache()
 
         # Load config from database
         if not self.load_config_from_db():
             logger.error("Failed to load configuration, exiting")
             return
 
-        # Connect to WebSocket
-        if not self.connect():
-            logger.error("Failed to connect, will retry...")
-
         # Main loop - refresh subscriptions periodically
         refresh_interval = 60  # seconds
         last_refresh = time.time()
+        was_trading_hours = False
 
         while not self._shutdown:
             try:
-                current_time = time.time()
+                # Check if within trading hours
+                is_trading = self.is_trading_hours()
 
-                # Refresh subscriptions periodically
-                if current_time - last_refresh >= refresh_interval:
-                    if self.authenticated:
-                        logger.info("Refreshing subscriptions...")
-                        self._subscribe_to_positions()
-                    last_refresh = current_time
+                if is_trading:
+                    # Within trading hours - connect if not connected
+                    if not was_trading_hours:
+                        logger.info("Trading hours started - connecting WebSocket...")
+                        if not self.connect():
+                            logger.error("Failed to connect, will retry in 30 seconds...")
+                            time.sleep(30)
+                            continue
+                        was_trading_hours = True
 
-                time.sleep(1)
+                    # Refresh subscriptions periodically
+                    current_time = time.time()
+                    if current_time - last_refresh >= refresh_interval:
+                        if self.authenticated:
+                            logger.info("Refreshing subscriptions...")
+                            self._subscribe_to_positions()
+                        last_refresh = current_time
+
+                    time.sleep(1)
+
+                else:
+                    # Outside trading hours - disconnect and sleep
+                    if was_trading_hours:
+                        logger.info("Trading hours ended - disconnecting WebSocket...")
+                        self.stop_websocket()
+                        was_trading_hours = False
+
+                    # Calculate time until next market open
+                    wait_seconds = self.get_time_until_market_open()
+
+                    # Cap at 1 hour to periodically recheck
+                    wait_seconds = min(wait_seconds, 3600)
+
+                    now = datetime.now(self.ist)
+                    next_check = now + timedelta(seconds=wait_seconds)
+                    logger.info(f"Outside trading hours. Sleeping until {next_check.strftime('%Y-%m-%d %H:%M:%S')} IST ({wait_seconds} seconds)")
+
+                    # Sleep in chunks to allow for graceful shutdown
+                    sleep_chunk = 60  # Check for shutdown every 60 seconds
+                    remaining = wait_seconds
+                    while remaining > 0 and not self._shutdown:
+                        sleep_time = min(sleep_chunk, remaining)
+                        time.sleep(sleep_time)
+                        remaining -= sleep_time
 
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
                 time.sleep(5)
 
         logger.info("WebSocket Service stopped")
+
+    def stop_websocket(self):
+        """Stop WebSocket connection without shutting down service"""
+        self.active = False
+        self.authenticated = False
+        self.subscriptions.clear()
+        self.latest_prices.clear()
+
+        if self.ws:
+            try:
+                self.ws.close()
+            except:
+                pass
+            self.ws = None
+
+        logger.info("WebSocket disconnected (outside trading hours)")
 
     def stop(self):
         """Stop the service"""

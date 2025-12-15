@@ -46,7 +46,9 @@
       "WebFetch(domain:github.com)",
       "Skill(frontend-design:frontend-design)",
       "Bash(docker compose:*)",
-      "Bash(.venvScriptspython.exe -m py_compile apptradingroutes.py)"
+      "Bash(.venvScriptspython.exe -m py_compile apptradingroutes.py)",
+      "Bash(.venvScriptspython.exe -m py_compile websocket_service.py)",
+      "Bash(D:AI Bootcamp 2025Session31algomirror.venvScriptspython.exe -m py_compile \"D:\\AI Bootcamp 2025\\Session31\\algomirror\\websocket_service.py\")"
     ],
     "deny": [],
     "ask": []
