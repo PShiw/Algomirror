@@ -3,11 +3,11 @@
 Standalone WebSocket Service for AlgoMirror
 Runs as a separate systemd service to handle real-time data streaming.
 
-This service:
+This service uses the OpenAlgo Python SDK for WebSocket connections:
 1. Maintains persistent WebSocket connections to OpenAlgo
 2. Updates position P&L in the database
 3. Triggers stop-loss/take-profit via order_status_poller integration
-4. Writes latest prices to a shared file/redis for the main app
+4. Writes latest prices to a shared file for the main app
 
 Usage:
     python websocket_service.py
@@ -23,7 +23,7 @@ import time
 import signal
 import logging
 import threading
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, time as dt_time, timedelta, date
 from pathlib import Path
 import pytz
 
@@ -43,7 +43,7 @@ logging.basicConfig(
 logger = logging.getLogger('WebSocketService')
 
 # Import after path setup
-import websocket
+from openalgo import api
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -55,18 +55,18 @@ SHARED_DATA_PATH = os.path.join(app_dir, 'instance', 'websocket_data.json')
 
 class StandaloneWebSocketService:
     """
-    Standalone WebSocket service that runs independently of Flask app.
+    Standalone WebSocket service using OpenAlgo SDK.
     Shares data via file-based storage for simplicity.
     """
 
     def __init__(self):
-        self.ws = None
+        self.client = None
+        self.host_url = None
         self.ws_url = None
         self.api_key = None
-        self.authenticated = False
-        self.active = False
+        self.connected = False
         self.subscriptions = set()
-        self.latest_prices = {}  # symbol -> {ltp, timestamp}
+        self.latest_prices = {}  # symbol -> {ltp, timestamp, ...}
         self._lock = threading.Lock()
         self._shutdown = False
 
@@ -96,7 +96,6 @@ class StandaloneWebSocketService:
             from app import create_app, db
             from app.models import TradingSession, MarketHoliday, SpecialTradingSession
             from sqlalchemy import and_
-            from datetime import date
 
             app = create_app()
             with app.app_context():
@@ -237,9 +236,6 @@ class StandaloneWebSocketService:
                 if not self.cached_sessions:
                     self._set_default_cache()
 
-            # Get trading days from cached sessions
-            trading_days = set(s['day_of_week'] for s in self.cached_sessions if s['is_active'])
-
             # Find session for current day
             current_session = None
             for session in self.cached_sessions:
@@ -292,7 +288,7 @@ class StandaloneWebSocketService:
         """Load WebSocket configuration from database"""
         try:
             from app import create_app, db
-            from app.models import TradingAccount, StrategyExecution
+            from app.models import TradingAccount
 
             app = create_app()
             with app.app_context():
@@ -309,9 +305,11 @@ class StandaloneWebSocketService:
                     ).first()
 
                 if primary_account:
+                    self.host_url = primary_account.host_url
                     self.ws_url = primary_account.websocket_url
                     self.api_key = primary_account.get_api_key()
                     logger.info(f"Loaded config from account: {primary_account.account_name}")
+                    logger.info(f"Host URL: {self.host_url}")
                     logger.info(f"WebSocket URL: {self.ws_url}")
                     return True
                 else:
@@ -335,189 +333,120 @@ class StandaloneWebSocketService:
                     StrategyExecution.status == 'entered'
                 ).all()
 
-                symbols = []
+                instruments = []
                 for exec in open_executions:
                     if exec.symbol:
-                        symbols.append({
+                        instruments.append({
                             'symbol': exec.symbol,
                             'exchange': exec.exchange or 'NFO'
                         })
 
-                logger.info(f"Found {len(symbols)} open positions to monitor")
-                return symbols
+                logger.info(f"Found {len(instruments)} open positions to monitor")
+                return instruments
 
         except Exception as e:
             logger.error(f"Failed to get open positions: {e}")
             return []
 
     def connect(self):
-        """Establish WebSocket connection"""
-        if not self.ws_url or not self.api_key:
-            logger.error("WebSocket URL or API key not configured")
+        """Establish WebSocket connection using OpenAlgo SDK"""
+        if not self.host_url or not self.ws_url or not self.api_key:
+            logger.error("Host URL, WebSocket URL, or API key not configured")
             return False
 
         try:
-            logger.info(f"Connecting to WebSocket: {self.ws_url}")
+            logger.info(f"Connecting to OpenAlgo WebSocket: {self.ws_url}")
 
-            self.ws = websocket.WebSocketApp(
-                self.ws_url,
-                on_open=self._on_open,
-                on_message=self._on_message,
-                on_error=self._on_error,
-                on_close=self._on_close
+            # Initialize OpenAlgo client with WebSocket support
+            self.client = api(
+                api_key=self.api_key,
+                host=self.host_url,
+                ws_url=self.ws_url
             )
 
-            # Run in background thread
-            self.ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
-            self.ws_thread.start()
+            # Connect to WebSocket
+            self.client.connect()
+            self.connected = True
 
-            # Wait for connection
-            time.sleep(3)
+            # Wait for connection to stabilize
+            time.sleep(2)
 
-            if self.authenticated:
-                self.active = True
-                logger.info("WebSocket connected and authenticated")
-                return True
-            else:
-                logger.warning("WebSocket connected but not authenticated")
-                return False
+            logger.info("OpenAlgo WebSocket connected successfully")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to connect WebSocket: {e}")
+            self.connected = False
             return False
 
-    def _on_open(self, ws):
-        """WebSocket opened callback"""
-        logger.info("WebSocket connection opened")
-
-        # Authenticate
-        auth_msg = {
-            "action": "authenticate",
-            "api_key": self.api_key
-        }
-        ws.send(json.dumps(auth_msg))
-
-    def _on_message(self, ws, message):
-        """Handle incoming WebSocket messages"""
+    def on_quote_data(self, data):
+        """Handle incoming quote data from OpenAlgo SDK"""
         try:
-            data = json.loads(message)
+            # OpenAlgo SDK format:
+            # {'type': 'market_data', 'symbol': 'INFY', 'exchange': 'NSE', 'mode': 2,
+            #  'data': {'open': 1585.0, 'high': 1606.8, 'low': 1585.0, 'close': 1598.2,
+            #           'ltp': 1605.8, 'volume': 1930758, 'timestamp': 1765781412568}}
 
-            # Handle authentication response
-            if data.get("type") == "auth":
-                if data.get("status") == "success":
-                    self.authenticated = True
-                    logger.info("Authentication successful")
+            symbol = data.get('symbol')
+            exchange = data.get('exchange')
+            market_data = data.get('data', {})
+            ltp = market_data.get('ltp')
 
-                    # Subscribe to open positions
-                    self._subscribe_to_positions()
-                else:
-                    logger.error(f"Authentication failed: {data}")
-                return
+            if symbol and ltp:
+                key = f"{exchange}:{symbol}"
+                with self._lock:
+                    self.latest_prices[key] = {
+                        'symbol': symbol,
+                        'exchange': exchange,
+                        'ltp': ltp,
+                        'open': market_data.get('open'),
+                        'high': market_data.get('high'),
+                        'low': market_data.get('low'),
+                        'close': market_data.get('close'),
+                        'volume': market_data.get('volume'),
+                        'timestamp': datetime.now(self.ist).isoformat()
+                    }
 
-            # Handle subscription response
-            if data.get("type") == "subscribe":
-                logger.debug(f"Subscription response: {data}")
-                return
+                # Save to shared file
+                self._save_prices()
 
-            # Handle market data
-            if data.get("type") == "market_data":
-                market_data = data.get('data', data)
-                symbol = market_data.get('symbol') or data.get('symbol')
-                ltp = market_data.get('ltp')
+                # Check stop-loss/take-profit triggers
+                self._check_risk_triggers(symbol, exchange, ltp)
 
-                if symbol and ltp:
-                    with self._lock:
-                        self.latest_prices[symbol] = {
-                            'ltp': ltp,
-                            'timestamp': datetime.now().isoformat(),
-                            'open': market_data.get('open'),
-                            'high': market_data.get('high'),
-                            'low': market_data.get('low'),
-                            'volume': market_data.get('volume')
-                        }
-
-                    # Update shared data file
-                    self._save_prices()
-
-                    # Check stop-loss/take-profit triggers
-                    self._check_risk_triggers(symbol, ltp)
-
-            elif data.get("ltp") is not None:
-                # Direct format
-                symbol = data.get('symbol')
-                ltp = data.get('ltp')
-
-                if symbol and ltp:
-                    with self._lock:
-                        self.latest_prices[symbol] = {
-                            'ltp': ltp,
-                            'timestamp': datetime.now().isoformat()
-                        }
-
-                    self._save_prices()
-                    self._check_risk_triggers(symbol, ltp)
-
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON: {message[:100]}")
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"Error processing quote data: {e}")
 
-    def _on_error(self, ws, error):
-        """WebSocket error callback"""
-        logger.error(f"WebSocket error: {error}")
+    def subscribe_to_positions(self):
+        """Subscribe to symbols with open positions using OpenAlgo SDK"""
+        instruments = self.get_open_positions()
 
-    def _on_close(self, ws, close_status_code=None, close_msg=None):
-        """WebSocket closed callback"""
-        logger.warning(f"WebSocket closed - Code: {close_status_code}, Message: {close_msg}")
-        self.authenticated = False
-
-        if self.active and not self._shutdown:
-            # Attempt reconnection
-            logger.info("Scheduling reconnection...")
-            threading.Thread(target=self._reconnect, daemon=True).start()
-
-    def _reconnect(self):
-        """Reconnect with exponential backoff"""
-        delays = [2, 4, 8, 16, 30, 60]
-
-        for i, delay in enumerate(delays):
-            if self._shutdown:
-                return
-
-            logger.info(f"Reconnection attempt {i+1}/{len(delays)} in {delay} seconds")
-            time.sleep(delay)
-
-            if self.connect():
-                logger.info("Reconnection successful")
-                return
-
-        logger.error("All reconnection attempts failed")
-
-    def _subscribe_to_positions(self):
-        """Subscribe to symbols with open positions"""
-        symbols = self.get_open_positions()
-
-        if not symbols:
+        if not instruments:
             logger.info("No open positions to subscribe")
             return
 
-        for inst in symbols:
-            symbol = inst['symbol']
-            exchange = inst['exchange']
+        # Unsubscribe from previous subscriptions if any
+        if self.subscriptions:
+            try:
+                old_instruments = [
+                    {'exchange': s.split(':')[0], 'symbol': s.split(':')[1]}
+                    for s in self.subscriptions
+                ]
+                self.client.unsubscribe_quote(old_instruments)
+                self.subscriptions.clear()
+            except Exception as e:
+                logger.warning(f"Error unsubscribing old instruments: {e}")
 
-            message = {
-                'action': 'subscribe',
-                'symbol': symbol,
-                'exchange': exchange,
-                'mode': 2,  # Quote mode for position monitoring
-                'depth': 5
-            }
+        # Subscribe to new instruments using quote mode (for OHLCV data)
+        try:
+            self.client.subscribe_quote(instruments, on_data_received=self.on_quote_data)
 
-            self.ws.send(json.dumps(message))
-            self.subscriptions.add(f"{exchange}:{symbol}")
-            logger.info(f"Subscribed to {exchange}:{symbol}")
+            for inst in instruments:
+                key = f"{inst['exchange']}:{inst['symbol']}"
+                self.subscriptions.add(key)
+                logger.info(f"Subscribed to {key}")
 
-            time.sleep(0.05)  # Small delay between subscriptions
+        except Exception as e:
+            logger.error(f"Error subscribing to instruments: {e}")
 
     def _save_prices(self):
         """Save latest prices to shared file"""
@@ -525,17 +454,17 @@ class StandaloneWebSocketService:
             with self._lock:
                 data = {
                     'prices': self.latest_prices,
-                    'updated_at': datetime.now().isoformat(),
+                    'updated_at': datetime.now(self.ist).isoformat(),
                     'subscriptions': list(self.subscriptions)
                 }
 
             with open(SHARED_DATA_PATH, 'w') as f:
-                json.dump(data, f)
+                json.dump(data, f, indent=2)
 
         except Exception as e:
             logger.error(f"Failed to save prices: {e}")
 
-    def _check_risk_triggers(self, symbol, ltp):
+    def _check_risk_triggers(self, symbol, exchange, ltp):
         """Check if stop-loss or take-profit should be triggered"""
         try:
             from app import create_app, db
@@ -589,7 +518,6 @@ class StandaloneWebSocketService:
         try:
             from app import create_app, db
             from app.models import RiskEvent
-            from app.utils.strategy_executor import StrategyExecutor
 
             app = create_app()
             with app.app_context():
@@ -618,7 +546,7 @@ class StandaloneWebSocketService:
 
     def run(self):
         """Main service loop with trading hours awareness"""
-        logger.info("Starting WebSocket Service...")
+        logger.info("Starting WebSocket Service (OpenAlgo SDK)...")
 
         # Load trading hours cache first
         self.refresh_trading_hours_cache()
@@ -646,14 +574,17 @@ class StandaloneWebSocketService:
                             logger.error("Failed to connect, will retry in 30 seconds...")
                             time.sleep(30)
                             continue
+
+                        # Subscribe to positions after connection
+                        self.subscribe_to_positions()
                         was_trading_hours = True
 
                     # Refresh subscriptions periodically
                     current_time = time.time()
                     if current_time - last_refresh >= refresh_interval:
-                        if self.authenticated:
+                        if self.connected:
                             logger.info("Refreshing subscriptions...")
-                            self._subscribe_to_positions()
+                            self.subscribe_to_positions()
                         last_refresh = current_time
 
                     time.sleep(1)
@@ -691,31 +622,23 @@ class StandaloneWebSocketService:
 
     def stop_websocket(self):
         """Stop WebSocket connection without shutting down service"""
-        self.active = False
-        self.authenticated = False
+        self.connected = False
         self.subscriptions.clear()
         self.latest_prices.clear()
 
-        if self.ws:
+        if self.client:
             try:
-                self.ws.close()
-            except:
-                pass
-            self.ws = None
+                self.client.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting client: {e}")
+            self.client = None
 
         logger.info("WebSocket disconnected (outside trading hours)")
 
     def stop(self):
         """Stop the service"""
-        self.active = False
         self._shutdown = True
-
-        if self.ws:
-            try:
-                self.ws.close()
-            except:
-                pass
-
+        self.stop_websocket()
         logger.info("WebSocket service stopped")
 
 

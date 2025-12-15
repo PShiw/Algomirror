@@ -108,7 +108,8 @@ class OptionChainBackgroundService:
             if hasattr(self.primary_account, 'websocket_url'):
                 connected = ws_manager.connect(
                     ws_url=self.primary_account.websocket_url,
-                    api_key=self.primary_account.get_api_key()
+                    api_key=self.primary_account.get_api_key(),
+                    host_url=self.primary_account.host_url
                 )
 
                 # Wait for authentication
@@ -392,7 +393,8 @@ class OptionChainBackgroundService:
                     if hasattr(self.primary_account, 'websocket_url'):
                         connected = ws_manager.connect(
                             ws_url=self.primary_account.websocket_url,
-                            api_key=self.primary_account.get_api_key()
+                            api_key=self.primary_account.get_api_key(),
+                            host_url=self.primary_account.host_url
                         )
                         
                         # If primary failed, ws_manager would have tried failover

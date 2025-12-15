@@ -1,8 +1,8 @@
 """
 Professional WebSocket Manager with Account Failover
-Handles real-time data streaming with enterprise-grade reliability
+Handles real-time data streaming using OpenAlgo Python SDK
 
-Uses standard threading for background tasks.
+Uses OpenAlgo SDK for WebSocket connections with enterprise-grade reliability.
 """
 
 import json
@@ -10,9 +10,11 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from collections import deque
-from typing import Dict, List, Optional, Any
-import websocket
+from typing import Dict, List, Optional, Any, Callable
 import pytz
+
+# OpenAlgo SDK
+from openalgo import api
 
 # Cross-platform compatibility
 from app.utils.compat import sleep, spawn, create_lock
@@ -22,57 +24,74 @@ logger = logging.getLogger(__name__)
 
 class ExponentialBackoff:
     """Exponential backoff strategy for reconnection"""
-    
+
     def __init__(self, base=2, max_delay=60):
         self.base = base
         self.max_delay = max_delay
         self.attempt = 0
-    
+
     def get_next_delay(self):
         delay = min(self.base ** self.attempt, self.max_delay)
         self.attempt += 1
         return delay
-    
+
     def reset(self):
         self.attempt = 0
 
 
 class WebSocketDataProcessor:
     """Process incoming WebSocket data based on subscription mode"""
-    
+
     def __init__(self):
         self.quote_handlers = []
         self.depth_handlers = []
         self.ltp_handlers = []
-    
+
     def register_quote_handler(self, handler):
         self.quote_handlers.append(handler)
-    
+
     def register_depth_handler(self, handler):
         self.depth_handlers.append(handler)
-    
+
     def register_ltp_handler(self, handler):
         self.ltp_handlers.append(handler)
-    
+
     def on_data_received(self, data):
         """
-        Process incoming WebSocket data based on subscription mode
+        Process incoming WebSocket data based on subscription mode.
+        OpenAlgo SDK format:
+        {'type': 'market_data', 'symbol': 'INFY', 'exchange': 'NSE', 'mode': 2,
+         'data': {'open': 1585.0, 'high': 1606.8, 'low': 1585.0, 'close': 1598.2,
+                  'ltp': 1605.8, 'volume': 1930758, 'timestamp': 1765781412568}}
         """
         try:
-            mode = data.get('mode', 'ltp')
+            # Get mode from data (1=LTP, 2=Quote, 3=Depth)
+            mode = data.get('mode', 1)
             symbol = data.get('symbol', 'UNKNOWN')
-            
-            logger.debug(f"[DATA_PROCESSOR] Routing data for {symbol}, mode={mode}, handlers: quote={len(self.quote_handlers)}, depth={len(self.depth_handlers)}, ltp={len(self.ltp_handlers)}")
-            
-            if mode == 'quote':
-                self.handle_quote_update(data)
-            elif mode == 'depth':
-                self.handle_depth_update(data)
-            else:  # ltp
-                self.handle_ltp_update(data)
+
+            # Extract market data from nested 'data' field if present
+            market_data = data.get('data', data)
+
+            # Merge symbol info into market_data for handlers
+            if not market_data.get('symbol'):
+                market_data['symbol'] = symbol
+                market_data['exchange'] = data.get('exchange', 'NFO')
+
+            logger.debug(f"[DATA_PROCESSOR] Routing data for {symbol}, mode={mode}")
+
+            if mode == 3 or mode == 'depth':
+                market_data['mode'] = 'depth'
+                self.handle_depth_update(market_data)
+            elif mode == 2 or mode == 'quote':
+                market_data['mode'] = 'quote'
+                self.handle_quote_update(market_data)
+            else:  # mode == 1 or 'ltp'
+                market_data['mode'] = 'ltp'
+                self.handle_ltp_update(market_data)
+
         except Exception as e:
             logger.error(f"Error processing WebSocket data: {e}, Data: {data}")
-    
+
     def handle_quote_update(self, data):
         """Process quote mode data"""
         for handler in self.quote_handlers:
@@ -80,7 +99,7 @@ class WebSocketDataProcessor:
                 handler(data)
             except Exception as e:
                 logger.error(f"Error in quote handler: {e}")
-    
+
     def handle_depth_update(self, data):
         """Process depth mode data (option strikes)"""
         for handler in self.depth_handlers:
@@ -88,7 +107,7 @@ class WebSocketDataProcessor:
                 handler(data)
             except Exception as e:
                 logger.error(f"Error in depth handler: {e}")
-    
+
     def handle_ltp_update(self, data):
         """Process LTP mode data"""
         for handler in self.ltp_handlers:
@@ -100,24 +119,29 @@ class WebSocketDataProcessor:
 
 class ProfessionalWebSocketManager:
     """
-    Enterprise-Grade WebSocket Connection Management with Account Failover
+    Enterprise-Grade WebSocket Connection Management using OpenAlgo SDK
+    with Account Failover support.
     """
-    
+
     def __init__(self):
         self.connection_pool = {}
         self.max_connections = 10
         self.heartbeat_interval = 30
-        self.reconnect_attempts = 3  # Reduced for faster failover
+        self.reconnect_attempts = 3
         self.backoff_strategy = ExponentialBackoff(base=2, max_delay=60)
         self.account_failover_enabled = True
         self.data_processor = WebSocketDataProcessor()
-        self.subscriptions = set()
+        self.subscriptions = {}  # {mode: [instruments]}
         self.active = False
-        self.ws = None
-        self.ws_thread = None
-        self.reconnect_thread = None
+        self.client = None
+        self.authenticated = False
         self._lock = create_lock()
-    
+
+        # Connection parameters
+        self.host_url = None
+        self.ws_url = None
+        self.api_key = None
+
     def create_connection_pool(self, primary_account, backup_accounts=None):
         """
         Create managed connection pool with multi-account failover capability
@@ -139,321 +163,97 @@ class ProfessionalWebSocketManager:
                 'last_message_time': None
             }
         }
-        
+
         # Initialize primary account connection
         pool['connections']['primary'] = {
             'account': primary_account,
-            'ws_primary': None,
-            'ws_backup': None,
             'status': 'active',
             'failure_count': 0
         }
-        
+
         # Pre-configure backup accounts (standby mode)
         for idx, backup_account in enumerate((backup_accounts or [])[:3]):
             pool['connections'][f'backup_{idx}'] = {
                 'account': backup_account,
-                'ws_primary': None,
-                'ws_backup': None,
                 'status': 'standby',
                 'failure_count': 0
             }
-        
+
         self.connection_pool = pool
         logger.debug(f"Connection pool created with {len(backup_accounts or [])} backup accounts")
         return pool
-    
-    def connect(self, ws_url, api_key):
-        """Establish WebSocket connection"""
+
+    def connect(self, ws_url: str, api_key: str, host_url: str = None):
+        """Establish WebSocket connection using OpenAlgo SDK"""
         try:
             self.ws_url = ws_url
             self.api_key = api_key
+            self.host_url = host_url or ws_url.replace('ws://', 'http://').replace(':8765', ':5000')
             self.authenticated = False
-            self.connection_failed = False
 
-            # Create WebSocket connection (no header auth - uses message auth)
-            self.ws = websocket.WebSocketApp(
-                ws_url,
-                on_open=self.on_open,
-                on_message=self.on_message,
-                on_error=self.on_error,
-                on_close=self.on_close
+            logger.debug(f"Connecting to OpenAlgo WebSocket: {ws_url}")
+
+            # Initialize OpenAlgo client with WebSocket support
+            self.client = api(
+                api_key=api_key,
+                host=self.host_url,
+                ws_url=ws_url
             )
 
-            # Start WebSocket in background thread
-            self.ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
-            self.ws_thread.start()
+            # Connect to WebSocket
+            self.client.connect()
+            self.active = True
+            self.authenticated = True
 
-            # Wait for connection to establish
+            # Wait for connection to stabilize
             sleep(2)
 
-            # Check if connection was immediately refused
-            if self.connection_failed:
-                logger.warning("Connection immediately failed")
-                return False
+            # Resubscribe to all previous subscriptions
+            if any(self.subscriptions.values()):
+                self.resubscribe_all()
 
-            self.active = True
-            logger.debug("WebSocket connection established")
+            self.backoff_strategy.reset()
+            logger.debug("OpenAlgo WebSocket connection established")
             return True
 
         except Exception as e:
             logger.error(f"Failed to connect WebSocket: {e}")
             self.handle_connection_failure()
             return False
-    
-    def on_open(self, ws):
-        """WebSocket opened callback"""
-        logger.debug("WebSocket connection opened")
-        self.backoff_strategy.reset()
-        
-        # Send authentication message (OpenAlgo style)
-        self.authenticate()
-        
-        # Resubscribe to all symbols after auth
-        if self.subscriptions and self.authenticated:
-            self.resubscribe_all()
-    
-    def authenticate(self):
-        """Authenticate with WebSocket server using OpenAlgo protocol"""
-        if self.ws:
-            auth_msg = {
-                "action": "authenticate",
-                "api_key": self.api_key
-            }
-            logger.debug(f"Authenticating with API key: {self.api_key[:8]}...{self.api_key[-8:]}")
-            self.ws.send(json.dumps(auth_msg))
-    
-    def on_message(self, ws, message):
-        """Handle incoming WebSocket messages"""
+
+    def _on_ltp_data(self, data):
+        """Internal handler for LTP data from OpenAlgo SDK"""
         try:
-            data = json.loads(message)
-            
-            # Log ALL incoming messages for debugging - include full data structure
-            # Reduced logging - only log non-market data or use debug level
-            msg_type = data.get('type')
-            if msg_type != 'market_data':
-                logger.debug(f"[WS_MSG] Received: type={msg_type}, symbol={data.get('symbol')}, exchange={data.get('exchange')}")
-            else:
-                logger.debug(f"[WS_DATA] Market data for {data.get('symbol')}")
-            
-            # Handle authentication response
-            if data.get("type") == "auth":
-                if data.get("status") == "success":
-                    self.authenticated = True
-                    logger.debug("Authentication successful!")
-                    # Resubscribe after successful auth
-                    if self.subscriptions:
-                        self.resubscribe_all()
-                else:
-                    logger.error(f"Authentication failed: {data}")
-                    self.authenticated = False
-                return
-            
-            # Handle subscription response
-            if data.get("type") == "subscribe":
-                logger.debug(f"[WS_SUB] Subscription response: status={data.get('status')}, message={data.get('message')}")
-                return
-            
-            # Update metrics
             if self.connection_pool:
                 self.connection_pool['metrics']['messages_received'] += 1
                 self.connection_pool['metrics']['last_message_time'] = datetime.now()
-            
-            # Process market data - handle various message types
-            # OpenAlgo WebSocket format includes nested 'data' field
-            if data.get("type") == "market_data":
-                # Extract actual market data from nested 'data' field
-                market_data = data.get('data', {})
-                if not market_data:
-                    market_data = data  # Fallback to root level
-                
-                # Merge symbol info from root level if needed
-                if not market_data.get('symbol') and data.get('symbol'):
-                    market_data['symbol'] = data['symbol']
-                    market_data['exchange'] = data.get('exchange', 'NFO')
-                
-                # Force mode to 'depth' for option data (mode 3)
-                if data.get('mode') == 3 or market_data.get('mode') == 3:
-                    market_data['mode'] = 'depth'
-                elif data.get('mode') == 2 or market_data.get('mode') == 2:
-                    market_data['mode'] = 'quote'
-                else:
-                    market_data['mode'] = 'ltp'
-                
-                logger.debug(f"[WS_DATA] Processing market data for {market_data.get('symbol')}: LTP={market_data.get('ltp')}")
-                self.data_processor.on_data_received(market_data)
-            elif data.get("ltp") is not None or data.get("symbol"):
-                # Direct data format
-                # Ensure mode is set based on data structure
-                if 'bids' in data or 'asks' in data or 'depth' in data:
-                    data['mode'] = 'depth'
-                elif 'open' in data or 'high' in data or 'low' in data:
-                    data['mode'] = 'quote'
-                else:
-                    data['mode'] = 'ltp'
-                
-                logger.debug(f"[WS_DATA] Processing price update for {data.get('symbol')}: mode={data['mode']}, LTP={data.get('ltp')}")
-                self.data_processor.on_data_received(data)
-            else:
-                logger.debug(f"[WS_UNKNOWN] Unhandled message type: {data}")
-            
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON message: {message[:100]}...")
+            self.data_processor.on_data_received(data)
         except Exception as e:
-            logger.error(f"Error processing message: {e}, Data: {message[:100]}...")
-    
-    def on_error(self, ws, error):
-        """WebSocket error callback"""
-        logger.error(f"WebSocket error: {error}")
-        
-        # Check if this is a connection refused error
-        error_str = str(error)
-        if "10061" in error_str or "Connection refused" in error_str or "actively refused" in error_str:
-            self.connection_failed = True
-            logger.warning("Connection refused by server, marking for failover")
-        
-        if self.connection_pool:
-            self.connection_pool['metrics']['total_failures'] += 1
-    
-    def on_close(self, ws, close_status_code=None, close_msg=None):
-        """WebSocket closed callback"""
-        logger.warning(f"WebSocket connection closed - Code: {close_status_code}, Message: {close_msg}")
-        
-        if self.active:
-            # Attempt reconnection
-            self.schedule_reconnection()
-    
-    def schedule_reconnection(self):
-        """Schedule reconnection with exponential backoff"""
-        if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-            self.reconnect_thread = threading.Thread(target=self.reconnect_with_backoff, daemon=True)
-            self.reconnect_thread.start()
-    
-    def reconnect_with_backoff(self):
-        """Reconnect with exponential backoff"""
-        connection_refused_count = 0
+            logger.error(f"Error in LTP data handler: {e}")
 
-        for attempt in range(self.reconnect_attempts):
-            delay = self.backoff_strategy.get_next_delay()
-            logger.debug(f"Reconnection attempt {attempt + 1}/{self.reconnect_attempts} in {delay} seconds")
-            sleep(delay)
-            
-            try:
-                # Reset the connection_failed flag before each attempt
-                self.connection_failed = False
-                
-                # First try to reconnect to the current account
-                current_account = self.connection_pool.get('current_account') if self.connection_pool else None
-                
-                # Use current account credentials if available, otherwise use stored ones
-                if current_account and hasattr(current_account, 'websocket_url'):
-                    ws_url = current_account.websocket_url
-                    api_key = current_account.get_api_key()
-                else:
-                    ws_url = self.ws_url
-                    api_key = self.api_key
-                
-                # Try to connect
-                connected = self.connect(ws_url, api_key)
-                
-                # Check if connection succeeded or was refused
-                if connected:
-                    logger.debug("Reconnection successful")
+    def _on_quote_data(self, data):
+        """Internal handler for Quote data from OpenAlgo SDK"""
+        try:
+            if self.connection_pool:
+                self.connection_pool['metrics']['messages_received'] += 1
+                self.connection_pool['metrics']['last_message_time'] = datetime.now()
+            self.data_processor.on_data_received(data)
+        except Exception as e:
+            logger.error(f"Error in Quote data handler: {e}")
 
-                    # Resubscribe to all previous subscriptions
-                    if self.subscriptions:
-                        logger.debug(f"Resubscribing to {len(self.subscriptions)} symbols after reconnection")
-                        sleep(1)  # Wait for authentication
-                        for sub_str in list(self.subscriptions):
-                            subscription = json.loads(sub_str)
-                            self.subscribe(subscription)
-                    return
-                else:
-                    # Check if connection was refused
-                    if self.connection_failed:
-                        connection_refused_count += 1
-                        logger.warning(f"Reconnection attempt {attempt + 1} failed - connection refused (count: {connection_refused_count})")
-                        
-                        # If connection is refused twice, immediately trigger failover
-                        if connection_refused_count >= 2:
-                            logger.error("Connection refused multiple times, immediately triggering failover")
-                            break
-                    else:
-                        logger.warning(f"Reconnection attempt {attempt + 1} failed - general failure")
-                    # Continue to next attempt
-                    
-            except Exception as e:
-                logger.error(f"Reconnection attempt {attempt + 1} failed with exception: {e}")
-        
-        # All reconnection attempts failed, initiate failover
-        logger.error(f"Max reconnection attempts ({self.reconnect_attempts}) reached, initiating failover")
-        self.handle_connection_failure()
-    
-    def handle_connection_failure(self):
-        """Handle complete connection failure"""
-        if self.account_failover_enabled and self.connection_pool:
-            self.attempt_account_failover()
-    
-    def attempt_account_failover(self):
-        """Attempt to switch to backup account"""
-        backup_accounts = self.connection_pool.get('backup_accounts', [])
-        
-        if backup_accounts:
-            # Store the previous account name before updating
-            previous_account = self.connection_pool.get('current_account')
-            from_account_name = previous_account.account_name if previous_account and hasattr(previous_account, 'account_name') else 'Unknown'
-            
-            next_account = backup_accounts[0]
-            logger.debug(f"Switching from {from_account_name} to backup account: {next_account.account_name}")
-            
-            # Update connection pool
-            self.connection_pool['current_account'] = next_account
-            self.connection_pool['backup_accounts'] = backup_accounts[1:]
-            self.connection_pool['metrics']['account_switches'] += 1
-            
-            # Add failover event to history
-            self.connection_pool['failover_history'].append({
-                'timestamp': datetime.now().isoformat(),
-                'from_account': from_account_name,
-                'to_account': next_account.account_name,
-                'reason': 'Connection failure after max reconnection attempts'
-            })
-            
-            # Connect with new account
-            if hasattr(next_account, 'websocket_url') and hasattr(next_account, 'get_api_key'):
-                logger.debug(f"Attempting to connect to backup WebSocket: {next_account.websocket_url}")
-                
-                # Update stored credentials for future reconnection attempts
-                self.ws_url = next_account.websocket_url
-                self.api_key = next_account.get_api_key()
-                
-                # Reset connection_failed flag before attempting backup connection
-                self.connection_failed = False
-                
-                # Try to connect with the backup account
-                if self.connect(next_account.websocket_url, next_account.get_api_key()):
-                    logger.debug(f"Successfully connected to backup account: {next_account.account_name}")
+    def _on_depth_data(self, data):
+        """Internal handler for Depth data from OpenAlgo SDK"""
+        try:
+            if self.connection_pool:
+                self.connection_pool['metrics']['messages_received'] += 1
+                self.connection_pool['metrics']['last_message_time'] = datetime.now()
+            self.data_processor.on_data_received(data)
+        except Exception as e:
+            logger.error(f"Error in Depth data handler: {e}")
 
-                    # Resubscribe to all previous subscriptions
-                    if self.subscriptions:
-                        logger.debug(f"Resubscribing to {len(self.subscriptions)} symbols after failover")
-                        sleep(1)  # Wait for authentication
-                        for sub_str in list(self.subscriptions):
-                            subscription = json.loads(sub_str)
-                            self.subscribe(subscription)
-                else:
-                    logger.error(f"Failed to connect to backup account: {next_account.account_name}")
-                    # Try next backup if available
-                    if self.connection_pool.get('backup_accounts'):
-                        self.attempt_account_failover()
-            else:
-                logger.error(f"Backup account missing required attributes: websocket_url or get_api_key")
-        else:
-            logger.critical("No backup accounts available for failover")
-    
-    def subscribe_batch(self, instruments, mode='ltp'):
+    def subscribe_batch(self, instruments: List[Dict], mode: str = 'ltp'):
         """
-        Subscribe to multiple instruments using OpenAlgo format
+        Subscribe to multiple instruments using OpenAlgo SDK
         instruments: list of dicts with 'symbol' and 'exchange' keys
         mode: subscription mode ('ltp', 'quote', 'depth')
         """
@@ -462,216 +262,187 @@ class ProfessionalWebSocketManager:
                 logger.warning("[WS_BATCH] No instruments provided")
                 return False
 
-            # Check if authenticated
-            if not self.authenticated:
-                logger.warning("[WS_BATCH] Not authenticated, queuing batch subscription")
-                # Queue individual subscriptions for later
-                for inst in instruments:
-                    subscription = {
-                        'symbol': inst.get('symbol'),
-                        'exchange': inst.get('exchange'),
-                        'mode': mode
-                    }
-                    self.subscriptions.add(json.dumps(subscription))
+            if not self.client or not self.active:
+                logger.warning("[WS_BATCH] Not connected, queuing batch subscription")
+                if mode not in self.subscriptions:
+                    self.subscriptions[mode] = []
+                self.subscriptions[mode].extend(instruments)
                 return False
 
-            if self.ws and self.ws.sock and self.ws.sock.connected:
-                # Map mode names to numbers
-                mode_map = {
-                    'ltp': 1,      # Mode 1 for LTP
-                    'quote': 2,    # Mode 2 for Quote
-                    'depth': 3     # Mode 3 for Market Depth
-                }
+            logger.debug(f"[WS_BATCH] Subscribing to {len(instruments)} instruments in {mode} mode")
 
-                mode_num = mode_map.get(mode, 1)  # Default to LTP
+            # Store subscriptions for reconnection
+            if mode not in self.subscriptions:
+                self.subscriptions[mode] = []
+            self.subscriptions[mode].extend(instruments)
 
-                logger.debug(f"[WS_BATCH] Subscribing to {len(instruments)} instruments in {mode} mode")
-
-                # Send individual subscription messages for each instrument
-                for inst in instruments:
-                    symbol = inst.get('symbol')
-                    exchange = inst.get('exchange')
-
-                    if not symbol or not exchange:
-                        logger.warning(f"[WS_BATCH] Skipping invalid instrument: {inst}")
-                        continue
-
-                    message = {
-                        'action': 'subscribe',
-                        'symbol': symbol,
-                        'exchange': exchange,
-                        'mode': mode_num,
-                        'depth': 5  # Default depth level
-                    }
-
-                    self.ws.send(json.dumps(message))
-
-                    # Add to subscriptions for tracking
-                    subscription = {
-                        'symbol': symbol,
-                        'exchange': exchange,
-                        'mode': mode
-                    }
-                    self.subscriptions.add(json.dumps(subscription))
-
-                    # Minimal delay between subscriptions
-                    # Removed to prevent blocking Flask startup
-
-                return True
+            # Subscribe using OpenAlgo SDK based on mode
+            if mode == 'ltp':
+                self.client.subscribe_ltp(instruments, on_data_received=self._on_ltp_data)
+            elif mode == 'quote':
+                self.client.subscribe_quote(instruments, on_data_received=self._on_quote_data)
+            elif mode == 'depth':
+                self.client.subscribe_depth(instruments, on_data_received=self._on_depth_data)
             else:
-                logger.warning("[WS_BATCH] WebSocket not connected")
+                logger.error(f"[WS_BATCH] Unknown mode: {mode}")
                 return False
+
+            logger.debug(f"[WS_BATCH] Successfully subscribed to {len(instruments)} instruments")
+            return True
 
         except Exception as e:
             logger.error(f"[WS_BATCH] Error: {e}")
             return False
-    
-    def subscribe(self, subscription):
-        """Subscribe to symbol with specified mode"""
+
+    def subscribe(self, subscription: Dict):
+        """Subscribe to single symbol with specified mode"""
         try:
             symbol = subscription.get('symbol')
             exchange = subscription.get('exchange')
             mode = subscription.get('mode', 'ltp')
 
-            # Validate required fields
             if not symbol or not exchange:
-                logger.error(f"[WS_SUBSCRIBE] Missing symbol or exchange: symbol={symbol}, exchange={exchange}")
+                logger.error(f"[WS_SUBSCRIBE] Missing symbol or exchange")
                 return False
 
-            logger.debug(f"[WS_SUBSCRIBE] Request: {symbol} on {exchange} in {mode} mode")
-
-            # Check if authenticated
-            if not self.authenticated:
-                logger.debug(f"[WS_SUBSCRIBE] Not authenticated, queuing {symbol}")
-                self.subscriptions.add(json.dumps(subscription))
-                return False
-
-            if self.ws and self.ws.sock and self.ws.sock.connected:
-                # Use exact OpenAlgo subscription format - individual messages per symbol
-                # Map mode names to numbers
-                mode_map = {
-                    'ltp': 1,      # Mode 1 for LTP
-                    'quote': 2,    # Mode 2 for Quote
-                    'depth': 3     # Mode 3 for Market Depth
-                }
-
-                mode_num = mode_map.get(mode, 1)  # Default to LTP
-
-                message = {
-                    'action': 'subscribe',
-                    'symbol': symbol,
-                    'exchange': exchange,
-                    'mode': mode_num,
-                    'depth': 5  # Default depth level
-                }
-
-                logger.debug(f"[WS_SUBSCRIBE] Sending subscription for {symbol}")
-                self.ws.send(json.dumps(message))
-                self.subscriptions.add(json.dumps(subscription))
-
-                # Small delay between subscriptions to avoid overwhelming server
-                sleep(0.05)  # 50ms delay
-                return True
-            else:
-                logger.warning(f"[WS_SUBSCRIBE] WebSocket not connected, queuing {symbol}")
-                self.subscriptions.add(json.dumps(subscription))
-                return False
+            instruments = [{'symbol': symbol, 'exchange': exchange}]
+            return self.subscribe_batch(instruments, mode)
 
         except Exception as e:
             logger.error(f"[WS_SUBSCRIBE] Error: {e}")
             return False
-    
-    def unsubscribe(self, subscription):
-        """Unsubscribe from symbol"""
+
+    def unsubscribe_batch(self, instruments: List[Dict], mode: str = 'ltp'):
+        """Unsubscribe from multiple instruments"""
         try:
-            if self.ws and self.ws.sock and self.ws.sock.connected:
-                message = {
-                    'action': 'unsubscribe',
-                    'exchange': subscription.get('exchange'),
-                    'symbol': subscription.get('symbol')
-                }
-                
-                self.ws.send(json.dumps(message))
-                
-                # Remove from subscriptions set
-                sub_str = json.dumps(subscription)
-                if sub_str in self.subscriptions:
-                    self.subscriptions.remove(sub_str)
-                
-                logger.debug(f"Unsubscribed from {subscription}")
-                return True
-                
+            if not self.client or not self.active:
+                logger.warning("[WS_UNSUB] Not connected")
+                return False
+
+            if mode == 'ltp':
+                self.client.unsubscribe_ltp(instruments)
+            elif mode == 'quote':
+                self.client.unsubscribe_quote(instruments)
+            elif mode == 'depth':
+                self.client.unsubscribe_depth(instruments)
+
+            # Remove from subscriptions
+            if mode in self.subscriptions:
+                for inst in instruments:
+                    key = f"{inst['exchange']}:{inst['symbol']}"
+                    self.subscriptions[mode] = [
+                        s for s in self.subscriptions[mode]
+                        if f"{s['exchange']}:{s['symbol']}" != key
+                    ]
+
+            logger.debug(f"[WS_UNSUB] Unsubscribed from {len(instruments)} instruments")
+            return True
+
         except Exception as e:
-            logger.error(f"Unsubscription error: {e}")
+            logger.error(f"[WS_UNSUB] Error: {e}")
             return False
-    
+
+    def unsubscribe(self, subscription: Dict):
+        """Unsubscribe from single symbol"""
+        instruments = [{'symbol': subscription.get('symbol'), 'exchange': subscription.get('exchange')}]
+        mode = subscription.get('mode', 'ltp')
+        return self.unsubscribe_batch(instruments, mode)
+
     def resubscribe_all(self):
         """Resubscribe to all symbols after reconnection"""
-        logger.debug(f"Resubscribing to {len(self.subscriptions)} symbols")
-        
-        # Map mode names to numbers
-        mode_map = {
-            'ltp': 1,      # Mode 1 for LTP
-            'quote': 2,    # Mode 2 for Quote
-            'depth': 3     # Mode 3 for Market Depth
-        }
-        
-        # Send individual subscription messages (OpenAlgo format)
-        for sub_str in self.subscriptions:
-            try:
-                subscription = json.loads(sub_str)
-                symbol = subscription.get('symbol')
-                exchange = subscription.get('exchange')
-                mode = subscription.get('mode', 'ltp')
-                
-                if not symbol or not exchange:
-                    logger.warning(f"[WS_RESUB] Skipping invalid subscription: {subscription}")
-                    continue
-                
-                mode_num = mode_map.get(mode, 1)  # Default to LTP
-                
-                message = {
-                    'action': 'subscribe',
-                    'symbol': symbol,
-                    'exchange': exchange,
-                    'mode': mode_num,
-                    'depth': 5  # Default depth level
-                }
+        total_count = sum(len(v) for v in self.subscriptions.values())
+        logger.debug(f"Resubscribing to {total_count} total instruments")
 
-                self.ws.send(json.dumps(message))
-                sleep(0.05)  # Small delay between subscriptions
-                
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse subscription: {sub_str}")
-                continue
-            except Exception as e:
-                logger.error(f"Failed to resubscribe: {e}")
-    
+        for mode, instruments in self.subscriptions.items():
+            if instruments:
+                try:
+                    # Clear the list before resubscribing to avoid duplicates
+                    instruments_copy = instruments.copy()
+                    self.subscriptions[mode] = []
+                    self.subscribe_batch(instruments_copy, mode)
+                except Exception as e:
+                    logger.error(f"Failed to resubscribe {mode} instruments: {e}")
+
+    def handle_connection_failure(self):
+        """Handle complete connection failure"""
+        if self.account_failover_enabled and self.connection_pool:
+            self.attempt_account_failover()
+
+    def attempt_account_failover(self):
+        """Attempt to switch to backup account"""
+        backup_accounts = self.connection_pool.get('backup_accounts', [])
+
+        if backup_accounts:
+            previous_account = self.connection_pool.get('current_account')
+            from_account_name = previous_account.account_name if previous_account and hasattr(previous_account, 'account_name') else 'Unknown'
+
+            next_account = backup_accounts[0]
+            logger.debug(f"Switching from {from_account_name} to backup account: {next_account.account_name}")
+
+            # Update connection pool
+            self.connection_pool['current_account'] = next_account
+            self.connection_pool['backup_accounts'] = backup_accounts[1:]
+            self.connection_pool['metrics']['account_switches'] += 1
+
+            # Add failover event to history
+            self.connection_pool['failover_history'].append({
+                'timestamp': datetime.now().isoformat(),
+                'from_account': from_account_name,
+                'to_account': next_account.account_name,
+                'reason': 'Connection failure after max reconnection attempts'
+            })
+
+            # Connect with new account
+            if hasattr(next_account, 'websocket_url') and hasattr(next_account, 'get_api_key'):
+                host_url = next_account.host_url if hasattr(next_account, 'host_url') else None
+
+                if self.connect(next_account.websocket_url, next_account.get_api_key(), host_url):
+                    logger.debug(f"Successfully connected to backup account: {next_account.account_name}")
+                else:
+                    logger.error(f"Failed to connect to backup account: {next_account.account_name}")
+                    if self.connection_pool.get('backup_accounts'):
+                        self.attempt_account_failover()
+            else:
+                logger.error("Backup account missing required attributes")
+        else:
+            logger.critical("No backup accounts available for failover")
+
     def disconnect(self):
         """Disconnect WebSocket"""
         try:
             self.active = False
-            if self.ws:
-                self.ws.close()
+            self.authenticated = False
+
+            if self.client:
+                try:
+                    self.client.disconnect()
+                except Exception as e:
+                    logger.warning(f"Error during disconnect: {e}")
+                self.client = None
+
             logger.debug("WebSocket disconnected")
         except Exception as e:
             logger.error(f"Error disconnecting WebSocket: {e}")
-    
+
     def get_status(self):
         """Get WebSocket connection status"""
         if not self.connection_pool:
             return {'status': 'not_initialized'}
-        
+
+        total_subscriptions = sum(len(v) for v in self.subscriptions.values())
+
         return {
             'status': 'active' if self.active else 'inactive',
-            'current_account': getattr(self.connection_pool.get('current_account'), 'name', 'Unknown'),
+            'authenticated': self.authenticated,
+            'current_account': getattr(self.connection_pool.get('current_account'), 'account_name', 'Unknown'),
             'backup_accounts': len(self.connection_pool.get('backup_accounts', [])),
             'metrics': self.connection_pool.get('metrics', {}),
-            'subscriptions': len(self.subscriptions),
-            'connected': self.ws.sock.connected if self.ws and self.ws.sock else False
+            'subscriptions': total_subscriptions,
+            'subscriptions_by_mode': {k: len(v) for k, v in self.subscriptions.items()},
+            'connected': self.active and self.client is not None
         }
-    
-    def register_handler(self, mode, handler):
+
+    def register_handler(self, mode: str, handler: Callable):
         """Register data handler for specific mode"""
         if mode == 'quote':
             self.data_processor.register_quote_handler(handler)
@@ -679,3 +450,30 @@ class ProfessionalWebSocketManager:
             self.data_processor.register_depth_handler(handler)
         elif mode == 'ltp':
             self.data_processor.register_ltp_handler(handler)
+
+    def get_ltp(self):
+        """Get cached LTP data from OpenAlgo SDK"""
+        if self.client:
+            try:
+                return self.client.get_ltp()
+            except Exception as e:
+                logger.error(f"Error getting LTP: {e}")
+        return {'ltp': {}}
+
+    def get_quotes(self):
+        """Get cached Quote data from OpenAlgo SDK"""
+        if self.client:
+            try:
+                return self.client.get_quotes()
+            except Exception as e:
+                logger.error(f"Error getting quotes: {e}")
+        return {'quote': {}}
+
+    def get_depth(self):
+        """Get cached Depth data from OpenAlgo SDK"""
+        if self.client:
+            try:
+                return self.client.get_depth()
+            except Exception as e:
+                logger.error(f"Error getting depth: {e}")
+        return {'depth': {}}
