@@ -33,13 +33,13 @@ def upgrade(db):
     for holiday_date, holiday_name, market, holiday_type in holidays_2026:
         # Check if holiday already exists
         result = db.session.execute(
-            text("SELECT id FROM market_holiday WHERE holiday_date = :hdate AND market = :market"),
+            text("SELECT id FROM market_holidays WHERE holiday_date = :hdate AND market = :market"),
             {"hdate": holiday_date.isoformat(), "market": market}
         )
         if result.fetchone() is None:
             db.session.execute(
                 text("""
-                    INSERT INTO market_holiday (holiday_date, holiday_name, market, holiday_type)
+                    INSERT INTO market_holidays (holiday_date, holiday_name, market, holiday_type)
                     VALUES (:hdate, :hname, :market, :htype)
                 """),
                 {"hdate": holiday_date.isoformat(), "hname": holiday_name, "market": market, "htype": holiday_type}
@@ -53,7 +53,7 @@ def upgrade(db):
 def downgrade(db):
     """Remove 2026 holidays"""
     db.session.execute(
-        text("DELETE FROM market_holiday WHERE holiday_date >= '2026-01-01' AND holiday_date <= '2026-12-31'")
+        text("DELETE FROM market_holidays WHERE holiday_date >= '2026-01-01' AND holiday_date <= '2026-12-31'")
     )
     db.session.commit()
     print("Removed 2026 holidays")
