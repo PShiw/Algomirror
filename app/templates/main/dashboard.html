@@ -64,7 +64,7 @@
             <div class="stat-value text-secondary text-2xl lg:text-4xl" id="total-available-cash">
                 <span class="loading loading-spinner loading-md"></span>
             </div>
-            <div class="stat-desc">Available Cash - Collateral</div>
+            <div class="stat-desc">Available Cash</div>
         </div>
 
         <div class="stat">
@@ -122,12 +122,6 @@
                     <div class="flex justify-between">
                         <span class="text-sm">Available:</span>
                         <span class="font-semibold" id="available-{{ account.id }}">
-                            <span class="loading loading-spinner loading-xs"></span>
-                        </span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-sm">Collateral:</span>
-                        <span class="font-semibold" id="collateral-{{ account.id }}">
                             <span class="loading loading-spinner loading-xs"></span>
                         </span>
                     </div>
@@ -546,7 +540,7 @@ async function confirmClosePositions() {
 // Load account funds data - fetch all accounts in PARALLEL for faster loading
 async function loadAccountFunds() {
     const accounts = {{ accounts_json|tojson }};
-    let totalCash = 0;  // Cash = Available Cash - Collateral
+    let totalCash = 0;
 
     // Add cache-busting timestamp to prevent stale data
     const timestamp = Date.now();
@@ -570,8 +564,7 @@ async function loadAccountFunds() {
                 const funds = data.data;
 
                 const available = parseFloat(funds.availablecash) || 0;
-                const collateral = parseFloat(funds.collateral) || 0;
-                const cash = available - collateral;  // Cash = Available Cash - Collateral
+                const cash = available;
 
                 const availableEl = document.getElementById(`available-${account.id}`);
                 if (availableEl) {
@@ -584,11 +577,6 @@ async function loadAccountFunds() {
                     marginEl.textContent = `₹${margin.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
                 }
 
-                const collateralEl = document.getElementById(`collateral-${account.id}`);
-                if (collateralEl) {
-                    collateralEl.textContent = `₹${collateral.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-                }
-
                 const cashEl = document.getElementById(`cash-${account.id}`);
                 if (cashEl) {
                     cashEl.textContent = `₹${cash.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
@@ -598,12 +586,10 @@ async function loadAccountFunds() {
             } else {
                 const availableEl = document.getElementById(`available-${account.id}`);
                 const marginEl = document.getElementById(`margin-${account.id}`);
-                const collateralEl = document.getElementById(`collateral-${account.id}`);
                 const cashEl = document.getElementById(`cash-${account.id}`);
 
                 if (availableEl) availableEl.textContent = '₹0.00';
                 if (marginEl) marginEl.textContent = '₹0.00';
-                if (collateralEl) collateralEl.textContent = '₹0.00';
                 if (cashEl) cashEl.textContent = '₹0.00';
             }
         } else {
@@ -614,18 +600,16 @@ async function loadAccountFunds() {
             if (account) {
                 const availableEl = document.getElementById(`available-${account.id}`);
                 const marginEl = document.getElementById(`margin-${account.id}`);
-                const collateralEl = document.getElementById(`collateral-${account.id}`);
                 const cashEl = document.getElementById(`cash-${account.id}`);
 
                 if (availableEl) availableEl.textContent = 'Error';
                 if (marginEl) marginEl.textContent = 'Error';
-                if (collateralEl) collateralEl.textContent = 'Error';
                 if (cashEl) cashEl.textContent = 'Error';
             }
         }
     }
 
-    // Update total cash (Available Cash - Collateral)
+    // Update total cash
     const totalCashEl = document.getElementById('total-available-cash');
     if (totalCashEl) {
         totalCashEl.textContent = `₹ ${totalCash.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
