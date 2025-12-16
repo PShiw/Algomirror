@@ -165,39 +165,13 @@
 </div>
 
 <script>
-// Auto-refresh every 3 seconds
-let autoRefreshInterval = null;
-let autoRefreshEnabled = true;
-
-function startAutoRefresh() {
-    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-    autoRefreshInterval = setInterval(() => {
-        if (autoRefreshEnabled) {
-            location.reload();
-        }
-    }, 3000);
-}
-
-// Start auto-refresh when page loads
-document.addEventListener('DOMContentLoaded', startAutoRefresh);
-
-// Stop auto-refresh when user interacts with page
-document.addEventListener('click', (e) => {
-    if (e.target.tagName === 'SELECT' || e.target.closest('.dropdown')) {
-        autoRefreshEnabled = false;
-        setTimeout(() => { autoRefreshEnabled = true; }, 10000);
-    }
-});
+// Auto-refresh disabled - use manual refresh button instead
 
 function exportToCSV(type) {
-    // Stop auto-refresh during export
-    autoRefreshEnabled = false;
-
     // Get the table
     const table = document.querySelector('table');
     if (!table) {
         alert('No data to export');
-        autoRefreshEnabled = true;
         return;
     }
 
@@ -240,8 +214,6 @@ function exportToCSV(type) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
-    autoRefreshEnabled = true;
 }
 </script>
 {% endblock %}
