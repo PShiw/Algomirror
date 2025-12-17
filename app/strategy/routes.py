@@ -1311,6 +1311,7 @@ def strategy_positions(strategy_id):
         logger.debug(f"[POSITIONS] Position ID {pos.id}: symbol={pos.symbol}, status={pos.status}, qty={pos.quantity}, leg={pos.leg.leg_number if pos.leg else None}")
 
     from app.utils.openalgo_client import ExtendedOpenAlgoAPI
+    from app.utils.background_service import option_chain_service
 
     # Pre-fetch LTP for all unique symbols (fetch once, use for all accounts)
     # This ensures consistent LTP across accounts for the same symbol
@@ -1319,21 +1320,43 @@ def strategy_positions(strategy_id):
     unique_symbols = set((p.symbol, p.exchange) for p in open_positions)
 
     if unique_symbols and open_positions:
-        # Use first available account to fetch LTP (all accounts get same market data)
-        first_account = open_positions[0].account
-        try:
-            client = ExtendedOpenAlgoAPI(
-                api_key=first_account.get_api_key(),
-                host=first_account.host_url
-            )
-            for symbol, exchange in unique_symbols:
-                try:
-                    quote = client.quotes(symbol=symbol, exchange=exchange)
-                    ltp_cache[(symbol, exchange)] = float(quote.get('data', {}).get('ltp', 0))
-                except Exception as e:
-                    logger.warning(f"[POSITIONS] Failed to fetch LTP for {symbol}: {e}")
-        except Exception as e:
-            logger.warning(f"[POSITIONS] Failed to create client for LTP fetch: {e}")
+        # Try to get LTP from WebSocket cache first (faster, no API calls)
+        ws_ltp_data = {}
+        if option_chain_service.shared_websocket_manager:
+            try:
+                ws_data = option_chain_service.shared_websocket_manager.get_ltp()
+                ws_ltp_data = ws_data.get('ltp', {})
+                logger.debug(f"[POSITIONS] WebSocket LTP cache has {len(ws_ltp_data)} symbols")
+            except Exception as e:
+                logger.warning(f"[POSITIONS] Failed to get WebSocket LTP cache: {e}")
+
+        # Check WebSocket cache for each symbol
+        symbols_needing_api = []
+        for symbol, exchange in unique_symbols:
+            ws_key = f"{exchange}:{symbol}"
+            if ws_key in ws_ltp_data:
+                ltp_cache[(symbol, exchange)] = float(ws_ltp_data[ws_key])
+                logger.debug(f"[POSITIONS] LTP from WebSocket cache: {symbol} = {ltp_cache[(symbol, exchange)]}")
+            else:
+                symbols_needing_api.append((symbol, exchange))
+
+        # Fallback to API call for symbols not in WebSocket cache (using primary account)
+        if symbols_needing_api:
+            primary_account = option_chain_service.primary_account or open_positions[0].account
+            try:
+                client = ExtendedOpenAlgoAPI(
+                    api_key=primary_account.get_api_key(),
+                    host=primary_account.host_url
+                )
+                for symbol, exchange in symbols_needing_api:
+                    try:
+                        quote = client.quotes(symbol=symbol, exchange=exchange)
+                        ltp_cache[(symbol, exchange)] = float(quote.get('data', {}).get('ltp', 0))
+                        logger.debug(f"[POSITIONS] LTP from API: {symbol} = {ltp_cache[(symbol, exchange)]}")
+                    except Exception as e:
+                        logger.warning(f"[POSITIONS] Failed to fetch LTP for {symbol}: {e}")
+            except Exception as e:
+                logger.warning(f"[POSITIONS] Failed to create client for LTP fetch: {e}")
 
     data = []
     for position in positions:
