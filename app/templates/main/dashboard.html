@@ -365,14 +365,10 @@
 </dialog>
 
 <script>
-// Format number in Lakhs if >= 1 lakh, otherwise show actual (e.g., 597000 → "5.97L", 56000 → "56,000")
+// Format number always in Lakhs (e.g., 597000 → "5.97L", 57000 → "0.57L")
 function formatInLakhs(num) {
-    if (num >= 100000) {
-        const lakhs = num / 100000;
-        return lakhs.toFixed(2) + 'L';
-    } else {
-        return num.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    }
+    const lakhs = num / 100000;
+    return lakhs.toFixed(2) + 'L';
 }
 
 // Strategy Dashboard JavaScript (migrated from /strategy)
