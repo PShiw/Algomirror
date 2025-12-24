@@ -1436,10 +1436,6 @@ async function convertToMarket(button) {
     const legItem = button.closest('.leg-item');
     const legNumber = legItem.querySelector('.leg-number').textContent;
 
-    if (!confirm(`Convert Leg ${legNumber} to Market Order? This will cancel the current pending order and place a market order for immediate execution.`)) {
-        return;
-    }
-
     try {
         // Get leg ID from execution data
         const legId = legItem.dataset.legId;
