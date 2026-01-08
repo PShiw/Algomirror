@@ -1,22 +1,166 @@
 """
 Supertrend Indicator Module
-Uses TA-Lib ATR with Pine Script logic for TradingView compatibility
+Calculates Supertrend matching Pine Script v6 implementation exactly
 
-Direction convention (matching Pine Script/TradingView):
+Pine Script Reference:
+    pine_supertrend(factor, atrPeriod) =>
+        src = hl2
+        atr = ta.atr(atrPeriod)
+        upperBand = src + factor * atr
+        lowerBand = src - factor * atr
+        prevLowerBand = nz(lowerBand[1])
+        prevUpperBand = nz(upperBand[1])
+
+        lowerBand := lowerBand > prevLowerBand or close[1] < prevLowerBand ? lowerBand : prevLowerBand
+        upperBand := upperBand < prevUpperBand or close[1] > prevUpperBand ? upperBand : prevUpperBand
+
+        int _direction = na
+        float superTrend = na
+        prevSuperTrend = superTrend[1]
+        if na(atr[1])
+            _direction := 1
+        else if prevSuperTrend == prevUpperBand
+            _direction := close > upperBand ? -1 : 1
+        else
+            _direction := close < lowerBand ? 1 : -1
+        superTrend := _direction == -1 ? lowerBand : upperBand
+        [superTrend, _direction]
+
+Direction convention (matching Pine Script):
     - direction = -1: Bullish (Up direction, green) - price above supertrend (lower band)
     - direction = 1: Bearish (Down direction, red) - price below supertrend (upper band)
 """
 import numpy as np
-import pandas as pd
+from numba import njit
 import talib
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def get_basic_bands(hl2_price, atr, multiplier):
+    """
+    Calculate basic upper and lower bands
+
+    Args:
+        hl2_price: HL2 price array (high + low) / 2
+        atr: Average True Range array
+        multiplier: ATR multiplier (factor)
+
+    Returns:
+        Tuple of (upper_band, lower_band)
+    """
+    matr = multiplier * atr
+    upper = hl2_price + matr
+    lower = hl2_price - matr
+    return upper, lower
+
+
+@njit
+def get_final_bands_nb(close, upper, lower):
+    """
+    Calculate final Supertrend bands and direction - MATCHING PINE SCRIPT EXACTLY
+
+    Pine Script logic:
+        lowerBand := lowerBand > prevLowerBand or close[1] < prevLowerBand ? lowerBand : prevLowerBand
+        upperBand := upperBand < prevUpperBand or close[1] > prevUpperBand ? upperBand : prevUpperBand
+
+        if na(atr[1])
+            _direction := 1
+        else if prevSuperTrend == prevUpperBand
+            _direction := close > upperBand ? -1 : 1
+        else
+            _direction := close < lowerBand ? 1 : -1
+        superTrend := _direction == -1 ? lowerBand : upperBand
+
+    Direction convention:
+        -1 = Bullish (Up direction, green line = lower band)
+         1 = Bearish (Down direction, red line = upper band)
+
+    Args:
+        close: Close price array
+        upper: Upper band array (will be modified in place)
+        lower: Lower band array (will be modified in place)
+
+    Returns:
+        Tuple of (trend, direction, long, short)
+    """
+    n = close.shape[0]
+    trend = np.full(n, np.nan)
+    dir_ = np.full(n, 1, dtype=np.int32)  # Start with bearish (1)
+    long = np.full(n, np.nan)   # Bullish line (lower band when direction = -1)
+    short = np.full(n, np.nan)  # Bearish line (upper band when direction = 1)
+
+    # Find first valid index (where bands are not NaN)
+    first_valid = -1
+    for i in range(n):
+        if not np.isnan(upper[i]) and not np.isnan(lower[i]):
+            first_valid = i
+            break
+
+    if first_valid < 0:
+        return trend, dir_, long, short
+
+    # Initialize first valid bar - Pine Script: if na(atr[1]) then direction = 1
+    # First bar starts as bearish (direction = 1), supertrend = upper band
+    dir_[first_valid] = 1
+    trend[first_valid] = upper[first_valid]
+    short[first_valid] = upper[first_valid]
+
+    # Process remaining bars
+    for i in range(first_valid + 1, n):
+        # Skip if current bar has NaN bands
+        if np.isnan(upper[i]) or np.isnan(lower[i]):
+            continue
+
+        # Check if previous bar had valid bands
+        prev_upper_valid = not np.isnan(upper[i - 1])
+        prev_lower_valid = not np.isnan(lower[i - 1])
+
+        # Step 1: Adjust bands FIRST (before direction check) - matching Pine Script
+        # Pine uses nz() which returns 0 for NA, but we handle differently:
+        # Only adjust if previous value was valid
+
+        # lowerBand := lowerBand > prevLowerBand or close[1] < prevLowerBand ? lowerBand : prevLowerBand
+        if prev_lower_valid:
+            if not (lower[i] > lower[i - 1] or close[i - 1] < lower[i - 1]):
+                lower[i] = lower[i - 1]
+
+        # upperBand := upperBand < prevUpperBand or close[1] > prevUpperBand ? upperBand : prevUpperBand
+        if prev_upper_valid:
+            if not (upper[i] < upper[i - 1] or close[i - 1] > upper[i - 1]):
+                upper[i] = upper[i - 1]
+
+        # Step 2: Determine direction based on previous supertrend position
+        # In Pine: if prevSuperTrend == prevUpperBand means we were bearish (direction was 1)
+        if dir_[i - 1] == 1:  # Previous was bearish (supertrend was upper band)
+            # _direction := close > upperBand ? -1 : 1
+            if close[i] > upper[i]:
+                dir_[i] = -1  # Flip to bullish
+            else:
+                dir_[i] = 1   # Stay bearish
+        else:  # Previous was bullish (direction was -1, supertrend was lower band)
+            # _direction := close < lowerBand ? 1 : -1
+            if close[i] < lower[i]:
+                dir_[i] = 1   # Flip to bearish
+            else:
+                dir_[i] = -1  # Stay bullish
+
+        # Step 3: Set supertrend value based on direction
+        # superTrend := _direction == -1 ? lowerBand : upperBand
+        if dir_[i] == -1:  # Bullish
+            trend[i] = lower[i]
+            long[i] = lower[i]
+        else:  # Bearish (direction == 1)
+            trend[i] = upper[i]
+            short[i] = upper[i]
+
+    return trend, dir_, long, short
+
+
 def calculate_supertrend(high, low, close, period=7, multiplier=3):
     """
-    Calculate Supertrend indicator matching TradingView Pine Script
+    Calculate Supertrend indicator matching Pine Script v6 exactly
 
     Args:
         high: High price array (numpy array or pandas Series)
@@ -49,88 +193,29 @@ def calculate_supertrend(high, low, close, period=7, multiplier=3):
         else:
             close = np.asarray(close, dtype=np.float64)
 
-        n = len(close)
+        # Calculate HL2 (src = hl2 in Pine Script)
+        hl2_price = (high + low) / 2.0
 
-        # Calculate ATR using TA-Lib (Wilder's smoothing)
+        # Calculate ATR using talib
         atr = talib.ATR(high, low, close, period)
 
-        # Calculate basic bands (src = hl2 in Pine Script)
-        hl_avg = (high + low) / 2.0
-        upper_band = hl_avg + multiplier * atr
-        lower_band = hl_avg - multiplier * atr
+        # Get basic bands
+        upper, lower = get_basic_bands(hl2_price, atr, multiplier)
 
-        # Initialize arrays
-        final_upper = np.full(n, np.nan)
-        final_lower = np.full(n, np.nan)
-        supertrend = np.full(n, np.nan)
-        direction = np.full(n, np.nan)
-        long_line = np.full(n, np.nan)
-        short_line = np.full(n, np.nan)
+        # Make copies to avoid modifying original arrays
+        upper = upper.copy()
+        lower = lower.copy()
 
-        # Find first valid ATR index
-        first_valid = -1
-        for i in range(n):
-            if not np.isnan(atr[i]):
-                first_valid = i
-                break
-
-        if first_valid < 0 or first_valid >= n:
-            return supertrend, direction, long_line, short_line
-
-        # Initialize first valid values
-        # Pine Script: if na(atr[1]) _direction := 1 (first bar is downtrend)
-        final_upper[first_valid] = upper_band[first_valid]
-        final_lower[first_valid] = lower_band[first_valid]
-        direction[first_valid] = 1.0  # downtrend (red in Pine Script)
-        supertrend[first_valid] = final_upper[first_valid]
-        short_line[first_valid] = final_upper[first_valid]
-
-        # Pine Script logic for subsequent bars
-        for i in range(first_valid + 1, n):
-            # Final lower band: lowerBand > prevLowerBand or close[1] < prevLowerBand ? lowerBand : prevLowerBand
-            if lower_band[i] > final_lower[i-1] or close[i-1] < final_lower[i-1]:
-                final_lower[i] = lower_band[i]
-            else:
-                final_lower[i] = final_lower[i-1]
-
-            # Final upper band: upperBand < prevUpperBand or close[1] > prevUpperBand ? upperBand : prevUpperBand
-            if upper_band[i] < final_upper[i-1] or close[i-1] > final_upper[i-1]:
-                final_upper[i] = upper_band[i]
-            else:
-                final_upper[i] = final_upper[i-1]
-
-            # Direction logic (Pine Script)
-            # if prevSuperTrend == prevUpperBand
-            #     _direction := close > upperBand ? -1 : 1
-            # else
-            #     _direction := close < lowerBand ? 1 : -1
-            if supertrend[i-1] == final_upper[i-1]:
-                # Previous was upper band (downtrend)
-                if close[i] > final_upper[i]:
-                    direction[i] = -1.0  # Change to uptrend (green)
-                else:
-                    direction[i] = 1.0   # Continue downtrend (red)
-            else:
-                # Previous was lower band (uptrend)
-                if close[i] < final_lower[i]:
-                    direction[i] = 1.0   # Change to downtrend (red)
-                else:
-                    direction[i] = -1.0  # Continue uptrend (green)
-
-            # Supertrend assignment: _direction == -1 ? lowerBand : upperBand
-            if direction[i] == -1.0:  # uptrend (green)
-                supertrend[i] = final_lower[i]
-                long_line[i] = final_lower[i]
-            else:  # downtrend (red)
-                supertrend[i] = final_upper[i]
-                short_line[i] = final_upper[i]
+        # Calculate final bands with direction (matching Pine Script)
+        trend, direction, long, short = get_final_bands_nb(close, upper, lower)
 
         logger.debug(f"Supertrend calculated: period={period}, multiplier={multiplier}")
 
-        return supertrend, direction, long_line, short_line
+        return trend, direction, long, short
 
     except Exception as e:
         logger.error(f"Error calculating Supertrend: {e}", exc_info=True)
+        # Return NaN arrays on error
         nan_array = np.full(len(close), np.nan)
         return nan_array, nan_array, nan_array, nan_array
 
@@ -184,6 +269,7 @@ def calculate_spread_supertrend(leg_prices_dict, high_col='high', low_col='low',
             return None
 
         # Calculate combined spread
+        # For now, simple sum of close prices (can be customized based on strategy)
         combined_high = None
         combined_low = None
         combined_close = None
@@ -199,7 +285,7 @@ def calculate_spread_supertrend(leg_prices_dict, high_col='high', low_col='low',
                 combined_close += df[close_col]
 
         # Calculate Supertrend on combined spread
-        trend, direction, long_line, short_line = calculate_supertrend(
+        trend, direction, long, short = calculate_supertrend(
             combined_high.values,
             combined_low.values,
             combined_close.values,
@@ -213,8 +299,8 @@ def calculate_spread_supertrend(leg_prices_dict, high_col='high', low_col='low',
             'close': combined_close,
             'supertrend': trend,
             'direction': direction,
-            'long': long_line,
-            'short': short_line,
+            'long': long,
+            'short': short,
             'signal': get_supertrend_signal(direction)
         }
 
