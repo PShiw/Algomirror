@@ -489,6 +489,12 @@ class StrategyExecution(db.Model):
     # Exit reason
     exit_reason = db.Column(db.String(100))  # 'stop_loss', 'take_profit', 'square_off', 'manual'
 
+    # Exit retry tracking - prevents duplicate exit orders
+    exit_retry_after = db.Column(db.DateTime)  # Don't retry before this timestamp (10s after attempt)
+    exit_attempt_count = db.Column(db.Integer, default=0)  # Number of exit attempts made
+    exit_pending_since = db.Column(db.DateTime)  # When exit was first attempted (for timeout tracking)
+    exit_broker_verified = db.Column(db.Boolean, default=False)  # True if broker confirmed no exit order exists
+
     # Error tracking
     error_message = db.Column(db.Text)
 

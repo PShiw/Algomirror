@@ -21,6 +21,11 @@ def get_ist_now():
 from app.models import Strategy, StrategyExecution, TradingAccount
 from app.utils.supertrend import calculate_supertrend
 from app.utils.openalgo_client import ExtendedOpenAlgoAPI
+from app.utils.exit_order_manager import (
+    can_attempt_exit, mark_exit_pending, mark_exit_success, mark_exit_failed,
+    mark_exit_confirmed, verify_exit_order_at_broker, get_pending_exit_retries,
+    EXIT_RETRY_DELAY_SECONDS, MAX_EXIT_ATTEMPTS
+)
 import pandas as pd
 import numpy as np
 
@@ -139,8 +144,8 @@ class SupertrendExitService:
 
                 logger.info(f"[SUPERTREND CYCLE {cycle_id}] Processed set after first loop: {strategies_processed_this_cycle}")
 
-                # RETRY MECHANISM: Check strategies where Supertrend was triggered but positions still open
-                # Only retry if enough time has passed since the trigger (to avoid race conditions)
+                # RETRY MECHANISM: Check strategies where Supertrend was triggered but positions still pending
+                # Uses exit_order_manager to check for positions ready for retry
                 triggered_strategies = Strategy.query.filter_by(
                     supertrend_exit_enabled=True,
                     supertrend_exit_triggered=True,
@@ -157,40 +162,16 @@ class SupertrendExitService:
                             logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: SKIPPING - in processed set")
                             continue
 
-                        # Skip retry if trigger was too recent (within 30 seconds) to avoid race conditions
-                        if strategy.supertrend_exit_triggered_at:
-                            seconds_since_trigger = (get_ist_now() - strategy.supertrend_exit_triggered_at).total_seconds()
-                            logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: triggered_at={strategy.supertrend_exit_triggered_at}, seconds_since={seconds_since_trigger:.2f}")
-                            if seconds_since_trigger < 30:
-                                logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: SKIPPING - only {seconds_since_trigger:.0f}s since trigger")
-                                continue
-                        else:
-                            # If triggered_at is None but triggered=True, skip to avoid issues
-                            logger.warning(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: triggered=True but triggered_at is None, SKIPPING")
-                            continue
+                        # Get positions ready for exit retry (exit_pending with expired retry timer)
+                        pending_retries = get_pending_exit_retries(strategy.id)
 
-                        # Check if there are still open positions that don't have exit orders
-                        open_positions = StrategyExecution.query.filter_by(
-                            strategy_id=strategy.id,
-                            status='entered'
-                        ).filter(
-                            StrategyExecution.exit_order_id.is_(None)  # Only positions without exit orders
-                        ).all()
+                        logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: {len(pending_retries)} positions ready for retry")
 
-                        # Filter out rejected/cancelled
-                        open_positions = [
-                            pos for pos in open_positions
-                            if not (hasattr(pos, 'broker_order_status') and
-                                   pos.broker_order_status in ['rejected', 'cancelled'])
-                        ]
-
-                        logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: {len(open_positions)} open positions without exit orders")
-
-                        if open_positions:
-                            for pos in open_positions:
-                                logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: Position {pos.id} - {pos.symbol}, status={pos.status}, exit_order_id={pos.exit_order_id}")
+                        if pending_retries:
+                            for pos in pending_retries:
+                                logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: Position {pos.id} - {pos.symbol}, status={pos.status}, attempt={pos.exit_attempt_count}")
                             logger.info(f"[SUPERTREND CYCLE {cycle_id}] RETRY Strategy {strategy.id}: Calling trigger_sequential_exit")
-                            self.trigger_sequential_exit(strategy, f"Supertrend RETRY - {len(open_positions)} positions remaining", app)
+                            self.trigger_sequential_exit(strategy, f"Supertrend RETRY - {len(pending_retries)} positions pending", app)
                     except Exception as e:
                         logger.error(f"Error retrying Supertrend exit for strategy {strategy.id}: {e}", exc_info=True)
 
@@ -682,17 +663,14 @@ class SupertrendExitService:
                             logger.warning(f"[SUPERTREND EXIT] Execution {exec_id} not found")
                             continue
 
-                        # Check if already has exit order (another thread may have processed it)
-                        if execution.exit_order_id:
-                            logger.info(f"[SUPERTREND EXIT] Execution {exec_id}: SKIPPING - already has exit order {execution.exit_order_id}")
+                        # DUPLICATE PREVENTION: Check if we can attempt exit using new exit order manager
+                        can_exit, exit_check_reason = can_attempt_exit(execution)
+                        if not can_exit:
+                            logger.info(f"[SUPERTREND EXIT] Execution {exec_id}: SKIPPING - {exit_check_reason}")
+                            db.session.rollback()  # Release the row lock
                             continue
 
-                        # Check status is still 'entered'
-                        if execution.status != 'entered':
-                            logger.info(f"[SUPERTREND EXIT] Execution {exec_id}: SKIPPING - status is {execution.status}, not 'entered'")
-                            continue
-
-                        logger.info(f"[SUPERTREND EXIT] Execution {exec_id}: PROCEEDING - status={execution.status}, exit_order_id={execution.exit_order_id}")
+                        logger.info(f"[SUPERTREND EXIT] Execution {exec_id}: PROCEEDING - can_attempt_exit=True")
 
                         # Use the execution's account (NOT primary account)
                         account = execution.account
@@ -716,18 +694,50 @@ class SupertrendExitService:
                         # Get product type - prefer execution's product, fallback to strategy's product_order_type
                         exit_product = execution.product or strategy.product_order_type or 'MIS'
 
-                        # RELIABILITY FIX: Mark as exit_pending BEFORE placing order
-                        # This prevents other processes from trying to exit this position
-                        execution.status = 'exit_pending'
-                        execution.exit_reason = exit_reason
-                        execution.exit_time = datetime.utcnow()
-                        db.session.commit()  # Commit immediately to claim this execution
+                        # DUPLICATE PREVENTION: Mark as exit_pending with retry tracking
+                        # This prevents duplicate exit orders by:
+                        # 1. Setting status to 'exit_pending' (not 'entered')
+                        # 2. Recording attempt count and retry timer
+                        mark_exit_pending(execution, exit_reason)
 
                         # Store values we need for order placement
                         exec_id = execution.id
                         exec_symbol = execution.symbol
                         exec_exchange = execution.exchange
                         exec_quantity = execution.quantity
+
+                        # DUPLICATE PREVENTION: For retry attempts, verify with broker before placing order
+                        # This prevents duplicate orders when the previous attempt actually succeeded
+                        attempt_count = execution.exit_attempt_count or 0
+                        if attempt_count > 1:  # This is a retry
+                            logger.info(f"[SUPERTREND EXIT] Retry attempt #{attempt_count} for {exec_symbol} - verifying with broker first")
+
+                            verification = verify_exit_order_at_broker(client, execution, strategy.name)
+
+                            if not verification['can_place_exit']:
+                                if verification['order_status'] == 'complete':
+                                    # Exit order already completed at broker - mark as confirmed
+                                    logger.info(f"[SUPERTREND EXIT] BROKER VERIFICATION: Exit already complete for {exec_symbol}")
+                                    mark_exit_confirmed(execution, 'complete', verification['order_id'])
+                                    success_count += 1
+                                    continue
+                                elif verification['position_quantity'] == 0:
+                                    # Position already closed at broker
+                                    logger.info(f"[SUPERTREND EXIT] BROKER VERIFICATION: Position already closed for {exec_symbol}")
+                                    from app import db
+                                    execution.status = 'exited'
+                                    execution.exit_reason = 'broker_confirmed_closed'
+                                    execution.exit_time = datetime.utcnow()
+                                    db.session.commit()
+                                    success_count += 1
+                                    continue
+                                else:
+                                    # Exit order exists but not complete (open/pending) - skip retry
+                                    logger.warning(f"[SUPERTREND EXIT] BROKER VERIFICATION: {verification['message']} - skipping retry")
+                                    db.session.rollback()
+                                    continue
+                            else:
+                                logger.info(f"[SUPERTREND EXIT] BROKER VERIFICATION: Safe to place exit for {exec_symbol}")
 
                         logger.info(f"[SUPERTREND EXIT] Placing exit for {exec_symbol} on {account.account_name}, action={exit_action}, qty={exec_quantity}, product={exit_product}")
 
@@ -774,10 +784,8 @@ class SupertrendExitService:
                         if response and response.get('status') == 'success':
                             order_id = response.get('orderid')
 
-                            # Update with the actual order ID
-                            execution.exit_order_id = order_id
-                            execution.broker_order_status = 'open'
-                            db.session.commit()  # Commit each execution to release row lock
+                            # DUPLICATE PREVENTION: Mark exit as successful with order ID
+                            mark_exit_success(execution, order_id)
                             success_count += 1
 
                             # Add exit order to polling queue
@@ -793,11 +801,10 @@ class SupertrendExitService:
                             error_msg = response.get('message', 'Unknown error') if response else 'No response'
                             logger.error(f"[SUPERTREND EXIT] Failed to place exit for {exec_symbol} on {account.account_name}: {error_msg}")
 
-                            # RELIABILITY FIX: Revert status to 'entered' so retry can pick it up
-                            execution.status = 'entered'
-                            execution.exit_reason = f"failed: {error_msg[:100]}"
-                            execution.exit_time = None
-                            db.session.commit()  # Commit to release lock
+                            # DUPLICATE PREVENTION: Mark exit as failed but keep status as 'exit_pending'
+                            # This prevents duplicate orders - the retry mechanism will verify with broker
+                            # before placing another order after the retry delay (10 seconds)
+                            mark_exit_failed(execution, error_msg, needs_broker_verification=True)
 
                     except Exception as e:
                         logger.error(f"[SUPERTREND EXIT] Exception closing execution {exec_id}: {str(e)}", exc_info=True)
@@ -807,15 +814,15 @@ class SupertrendExitService:
                 fail_count = len(execution_ids) - success_count
                 if fail_count > 0:
                     logger.error(f"[SUPERTREND EXIT] WARNING: {fail_count} exit orders FAILED out of {len(execution_ids)} total!")
-                    print(f"[SUPERTREND EXIT] CRITICAL: {fail_count} orders failed - manual intervention may be required!")
+                    print(f"[SUPERTREND EXIT] CRITICAL: {fail_count} orders failed - will retry after {EXIT_RETRY_DELAY_SECONDS}s")
 
-                    # Log which executions still don't have exit orders
+                    # Log which executions are pending retry
                     for exec_id in execution_ids:
                         try:
                             exec_check = StrategyExecution.query.get(exec_id)
-                            if exec_check and exec_check.status == 'entered' and not exec_check.exit_order_id:
-                                logger.error(f"[SUPERTREND EXIT] MISSING EXIT: Execution {exec_id} ({exec_check.symbol}) still has no exit order!")
-                                print(f"[SUPERTREND EXIT] MISSING: {exec_check.symbol} on {exec_check.account.account_name if exec_check.account else 'Unknown'}")
+                            if exec_check and exec_check.status == 'exit_pending' and not exec_check.exit_order_id:
+                                logger.warning(f"[SUPERTREND EXIT] PENDING RETRY: Execution {exec_id} ({exec_check.symbol}) - retry after {exec_check.exit_retry_after}")
+                                print(f"[SUPERTREND EXIT] PENDING: {exec_check.symbol} - retry after {exec_check.exit_retry_after}")
                         except Exception:
                             pass
 
