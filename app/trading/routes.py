@@ -1715,6 +1715,7 @@ def risk_status_stream():
         Returns:
             bool: True if exit orders placed successfully
         """
+        from datetime import datetime
         from app.models import TradingAccount, Strategy, StrategyExecution, Order
         from app.utils.openalgo_client import ExtendedOpenAlgoAPI
         from app.utils.order_status_poller import order_status_poller
@@ -1726,10 +1727,12 @@ def risk_status_stream():
                     print(f"[RISK MONITOR] ERROR: Strategy {strategy_id} not found for {exit_reason}", flush=True)
                     return False
 
-                # Get all open executions
-                open_executions = StrategyExecution.query.filter_by(
-                    strategy_id=strategy_id,
-                    status='entered'
+                # Get all open executions (with improved filters)
+                open_executions = StrategyExecution.query.filter(
+                    StrategyExecution.strategy_id == strategy_id,
+                    StrategyExecution.status == 'entered',
+                    StrategyExecution.exit_order_id.is_(None),
+                    StrategyExecution.quantity > 0
                 ).all()
 
                 if not open_executions:
@@ -1879,7 +1882,6 @@ def risk_status_stream():
 
                 # Set triggered_at timestamp based on exit reason
                 if success_count > 0:
-                    from datetime import datetime
                     import pytz
                     ist = pytz.timezone('Asia/Kolkata')
                     now_ist = datetime.now(ist)
