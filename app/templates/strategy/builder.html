@@ -1033,9 +1033,13 @@ let lotSizes = {};  // Store lot sizes fetched from backend
 
 // Toggle all account checkboxes
 function toggleAllAccounts(selectAllCheckbox) {
+    // Don't allow toggling if accounts are frozen
+    if (selectAllCheckbox.disabled) return;
     const accountCheckboxes = document.querySelectorAll('.account-checkbox');
     accountCheckboxes.forEach(checkbox => {
-        checkbox.checked = selectAllCheckbox.checked;
+        if (!checkbox.disabled) {
+            checkbox.checked = selectAllCheckbox.checked;
+        }
     });
 }
 
@@ -2195,11 +2199,32 @@ function freezeAccountsIfExecuted() {
     const hasExecutedLeg = document.querySelector('.leg-frozen');
 
     if (hasExecutedLeg) {
+        // Disable all individual account checkboxes
         const accountCheckboxes = document.querySelectorAll('input[name="accounts"]');
         accountCheckboxes.forEach(checkbox => {
             checkbox.disabled = true;
             checkbox.classList.add('cursor-not-allowed');
+            // Disable the parent label click interaction
+            const label = checkbox.closest('label');
+            if (label) {
+                label.classList.remove('cursor-pointer');
+                label.classList.add('cursor-not-allowed', 'opacity-60');
+                label.style.pointerEvents = 'none';
+            }
         });
+
+        // Disable the "Select All" checkbox too
+        const selectAllCheckbox = document.getElementById('selectAllAccounts');
+        if (selectAllCheckbox) {
+            selectAllCheckbox.disabled = true;
+            selectAllCheckbox.classList.add('cursor-not-allowed');
+            const selectAllLabel = selectAllCheckbox.closest('label');
+            if (selectAllLabel) {
+                selectAllLabel.classList.remove('cursor-pointer');
+                selectAllLabel.classList.add('cursor-not-allowed', 'opacity-60');
+                selectAllLabel.style.pointerEvents = 'none';
+            }
+        }
     }
 }
 
