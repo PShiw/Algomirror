@@ -104,7 +104,7 @@ def get_chart_data(strategy_id):
         multiplier = float(request.args.get('multiplier', strategy.supertrend_multiplier or 3.0))
 
         # Validate parameters
-        if interval not in ['3m', '5m', '10m', '15m']:
+        if interval not in ['1m', '3m', '5m', '10m', '15m']:
             interval = '5m'
         if days < 1 or days > 5:
             days = 5
