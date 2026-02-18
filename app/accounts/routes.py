@@ -1,11 +1,14 @@
+import threading
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import render_template, redirect, url_for, flash, request, current_app, jsonify
 from flask_login import login_required, current_user
 from app.accounts import accounts_bp
 from app.accounts.forms import AddAccountForm, EditAccountForm
-from app.models import TradingAccount, ActivityLog
+from app.models import TradingAccount, ActivityLog, StrategyExecution
 from app import db
 from app.utils.openalgo_client import ExtendedOpenAlgoAPI
+from app.utils.freeze_quantity_handler import place_order_with_freeze_check
 from app.utils.rate_limiter import api_rate_limit, heavy_rate_limit
 from app.utils.background_service import option_chain_service
 import json
@@ -434,3 +437,190 @@ def test_connection_preview():
             'status': 'error',
             'message': f'Connection test failed: {str(e)}'
         })
+
+
+@accounts_bp.route('/panic-close-all', methods=['POST'])
+@login_required
+@heavy_rate_limit()
+def panic_close_all():
+    """Close all positions across all connected accounts (panic button).
+
+    For each active connected account:
+    1. Cancel all pending orders
+    2. Fetch positionbook to discover open positions
+    3. Close each position with freeze-quantity-aware order placement
+       (uses splitorder when quantity exceeds freeze limit, regular placeorder otherwise)
+    """
+    accounts = TradingAccount.query.filter_by(
+        user_id=current_user.id,
+        is_active=True,
+        connection_status='connected'
+    ).all()
+
+    if not accounts:
+        return jsonify({
+            'status': 'error',
+            'message': 'No active connected accounts found'
+        })
+
+    app = current_app._get_current_object()
+    user_id = current_user.id
+    results = []
+    results_lock = threading.Lock()
+
+    def close_account_positions(account_id, api_key, host_url, account_name):
+        """Close all positions for a single account with freeze limit handling."""
+        position_results = []
+
+        try:
+            client = ExtendedOpenAlgoAPI(api_key=api_key, host=host_url)
+
+            # Step 1: Cancel all pending orders first
+            cancel_msg = ''
+            try:
+                cancel_response = client.cancelallorder(strategy="AlgoMirror_Panic")
+                cancel_msg = cancel_response.get('message', '')
+            except Exception as e:
+                cancel_msg = f'Failed to cancel orders: {e}'
+
+            # Step 2: Fetch positionbook to get actual open positions
+            positions_response = client.positionbook()
+            if positions_response.get('status') != 'success':
+                return {
+                    'account_id': account_id,
+                    'account_name': account_name,
+                    'status': 'error',
+                    'message': 'Failed to fetch positions',
+                    'cancel_orders': cancel_msg
+                }
+
+            positions = positions_response.get('data', [])
+
+            # Filter to non-zero quantity positions only
+            open_positions = []
+            for pos in positions:
+                qty = int(float(pos.get('quantity', '0')))
+                if qty != 0:
+                    open_positions.append(pos)
+
+            if not open_positions:
+                return {
+                    'account_id': account_id,
+                    'account_name': account_name,
+                    'status': 'success',
+                    'message': 'No open positions',
+                    'cancel_orders': cancel_msg,
+                    'positions_closed': 0,
+                    'positions_total': 0
+                }
+
+            # Step 3: Close each position with freeze-quantity-aware placement
+            with app.app_context():
+                for pos in open_positions:
+                    symbol = pos.get('symbol')
+                    exchange = pos.get('exchange')
+                    product = pos.get('product', 'MIS')
+                    qty = int(float(pos.get('quantity', '0')))
+
+                    # Reverse action: positive qty = long (SELL to close), negative = short (BUY to close)
+                    close_action = 'SELL' if qty > 0 else 'BUY'
+                    close_qty = abs(qty)
+
+                    try:
+                        response = place_order_with_freeze_check(
+                            client=client,
+                            user_id=user_id,
+                            strategy="AlgoMirror_Panic",
+                            symbol=symbol,
+                            exchange=exchange,
+                            action=close_action,
+                            quantity=close_qty,
+                            price_type='MARKET',
+                            product=product
+                        )
+
+                        position_results.append({
+                            'symbol': symbol,
+                            'action': close_action,
+                            'quantity': close_qty,
+                            'status': response.get('status', 'error'),
+                            'message': response.get('message', ''),
+                            'split_order': response.get('split_order', False)
+                        })
+                    except Exception as e:
+                        position_results.append({
+                            'symbol': symbol,
+                            'action': close_action,
+                            'quantity': close_qty,
+                            'status': 'error',
+                            'message': str(e)
+                        })
+
+            closed_count = sum(1 for r in position_results if r['status'] == 'success')
+
+            return {
+                'account_id': account_id,
+                'account_name': account_name,
+                'status': 'success' if closed_count > 0 else 'error',
+                'cancel_orders': cancel_msg,
+                'positions_closed': closed_count,
+                'positions_total': len(open_positions),
+                'details': position_results
+            }
+        except Exception as e:
+            return {
+                'account_id': account_id,
+                'account_name': account_name,
+                'status': 'error',
+                'message': str(e)
+            }
+
+    # Collect account data before threading (avoid lazy-load issues in threads)
+    account_data = [
+        (acc.id, acc.get_api_key(), acc.host_url, acc.account_name)
+        for acc in accounts
+    ]
+
+    # Execute accounts in parallel
+    with ThreadPoolExecutor(max_workers=min(len(account_data), 10)) as executor:
+        futures = {
+            executor.submit(close_account_positions, *data): data
+            for data in account_data
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    # Update StrategyExecution records: mark 'entered' positions as 'exited'
+    try:
+        account_ids = [acc.id for acc in accounts]
+        now = datetime.utcnow()
+        StrategyExecution.query.filter(
+            StrategyExecution.account_id.in_(account_ids),
+            StrategyExecution.status == 'entered'
+        ).update({
+            'status': 'exited',
+            'exit_reason': 'panic_close',
+            'exit_time': now
+        }, synchronize_session='fetch')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Failed to update strategy executions on panic close: {str(e)}')
+
+    success_count = sum(1 for r in results if r.get('status') == 'success')
+    total_closed = sum(r.get('positions_closed', 0) for r in results)
+    total_positions = sum(r.get('positions_total', 0) for r in results)
+
+    log_activity('panic_close_all', {
+        'total_accounts': len(accounts),
+        'success_count': success_count,
+        'total_positions_closed': total_closed,
+        'total_positions_found': total_positions,
+        'results': results
+    })
+
+    return jsonify({
+        'status': 'success' if success_count > 0 else 'error',
+        'message': f'Closed {total_closed}/{total_positions} positions across {success_count}/{len(accounts)} accounts',
+        'results': results
+    })

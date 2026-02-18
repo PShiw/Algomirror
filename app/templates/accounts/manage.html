@@ -8,12 +8,19 @@
 {% block content %}
 <div class="flex justify-between items-center mb-6">
     <h1 class="text-3xl font-bold">Manage Accounts</h1>
-    <a href="{{ url_for('accounts.add') }}" class="btn btn-primary">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-        </svg>
-        Add Account
-    </a>
+    <div class="flex gap-2">
+        {% if accounts %}
+        <button onclick="document.getElementById('panic-modal').showModal()" class="btn btn-error">
+            Close All Positions
+        </button>
+        {% endif %}
+        <a href="{{ url_for('accounts.add') }}" class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Add Account
+        </a>
+    </div>
 </div>
 
 {% if accounts %}
@@ -165,6 +172,23 @@
         </div>
     </div>
 </dialog>
+
+<!-- Panic Close All Confirmation Modal -->
+<dialog id="panic-modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg text-error">Close All Positions</h3>
+        <p class="py-4">This will <strong>cancel all pending orders</strong> and <strong>close all open positions</strong> across <strong>ALL connected accounts</strong>.</p>
+        <div class="alert alert-error mb-4">
+            <span>This action cannot be undone. All positions will be squared off at market price.</span>
+        </div>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn">Cancel</button>
+            </form>
+            <button id="confirm-panic" class="btn btn-error">Yes, Close All Positions</button>
+        </div>
+    </div>
+</dialog>
 {% endblock %}
 
 {% block head %}
@@ -250,6 +274,45 @@ function deleteAccount(accountId, accountName, isPrimary) {
     document.getElementById('delete-modal').showModal();
 }
 
+function panicCloseAll() {
+    const btn = document.getElementById('confirm-panic');
+    btn.disabled = true;
+    btn.textContent = 'Closing...';
+
+    document.getElementById('panic-modal').close();
+    showToast('Closing all positions across all accounts...', 'info');
+
+    fetchWithCSRF('/accounts/panic-close-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+        .then(response => response.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Yes, Close All Positions';
+
+            if (data.results) {
+                data.results.forEach(r => {
+                    if (r.status === 'success') {
+                        const msg = r.positions_total > 0
+                            ? `${r.account_name}: ${r.positions_closed}/${r.positions_total} positions closed`
+                            : `${r.account_name}: No open positions`;
+                        showToast(msg, 'success');
+                    } else {
+                        showToast(`${r.account_name}: ${r.message || 'Failed'}`, 'error');
+                    }
+                });
+            }
+
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+        })
+        .catch(error => {
+            btn.disabled = false;
+            btn.textContent = 'Yes, Close All Positions';
+            showToast('Panic close failed: ' + error.message, 'error');
+        });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const confirmDeleteBtn = document.getElementById('confirm-delete');
     if (confirmDeleteBtn) {
@@ -272,6 +335,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 form.submit();
             }
         });
+    }
+
+    const confirmPanicBtn = document.getElementById('confirm-panic');
+    if (confirmPanicBtn) {
+        confirmPanicBtn.addEventListener('click', panicCloseAll);
     }
 });
 </script>
