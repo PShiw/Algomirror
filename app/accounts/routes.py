@@ -496,11 +496,11 @@ def panic_close_all():
 
             positions = positions_response.get('data', [])
 
-            # Filter to non-zero quantity positions only
+            # Filter to non-zero quantity NFO positions only
             open_positions = []
             for pos in positions:
                 qty = int(float(pos.get('quantity', '0')))
-                if qty != 0:
+                if qty != 0 and pos.get('exchange') == 'NFO':
                     open_positions.append(pos)
 
             if not open_positions:
@@ -508,7 +508,7 @@ def panic_close_all():
                     'account_id': account_id,
                     'account_name': account_name,
                     'status': 'success',
-                    'message': 'No open positions',
+                    'message': 'No open NFO positions',
                     'cancel_orders': cancel_msg,
                     'positions_closed': 0,
                     'positions_total': 0
