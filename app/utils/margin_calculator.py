@@ -432,14 +432,27 @@ class MarginCalculator:
                 logger.warning(f"[MARGIN DEBUG] API call failed, status: {response.get('status')}, message: {response.get('message')}")
                 # Fallback to cached data if available
                 if account.last_funds_data:
-                    fallback_margin = account.last_funds_data.get('totalcash', 0)
-                    logger.debug(f"[MARGIN DEBUG] Using fallback margin from last_funds_data: ₹{fallback_margin:,.2f}")
+                    available_cash = float(account.last_funds_data.get('availablecash', 0))
+                    used_margin = float(account.last_funds_data.get('utiliseddebits', 0))
+                    fallback_margin = available_cash - used_margin
+                    logger.debug(f"[MARGIN DEBUG] Using fallback margin from last_funds_data: ₹{fallback_margin:,.2f} (availablecash={available_cash:,.2f} - utiliseddebits={used_margin:,.2f})")
                     return fallback_margin
+                # Fallback to existing tracker if available
+                if tracker and tracker.free_margin is not None:
+                    logger.debug(f"[MARGIN DEBUG] Using existing tracker free_margin: ₹{tracker.free_margin:,.2f}")
+                    return tracker.free_margin
                 logger.warning(f"[MARGIN DEBUG] No fallback data available, returning 0")
                 return 0
 
         except Exception as e:
             logger.error(f"[MARGIN DEBUG] Error fetching available margin: {e}", exc_info=True)
+            # Try fallback to cached data on exception
+            if account.last_funds_data:
+                available_cash = float(account.last_funds_data.get('availablecash', 0))
+                used_margin = float(account.last_funds_data.get('utiliseddebits', 0))
+                fallback_margin = available_cash - used_margin
+                logger.debug(f"[MARGIN DEBUG] Exception fallback margin: ₹{fallback_margin:,.2f}")
+                return fallback_margin
             return 0
 
     def get_cash_margin(self, account: TradingAccount, force_refresh: bool = True) -> float:
