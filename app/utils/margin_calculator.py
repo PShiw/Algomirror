@@ -454,7 +454,7 @@ class MarginCalculator:
             force_refresh: If True, always fetch fresh data from API
 
         Returns:
-            Cash margin amount (availablecash from API)
+            Cash margin amount (availablecash - collateral from API)
         """
         try:
             logger.debug(f"[CASH MARGIN] Getting cash margin for account: {account.account_name}")
@@ -469,15 +469,19 @@ class MarginCalculator:
 
             if response.get('status') == 'success':
                 funds_data = response.get('data', {})
-                # Get availablecash - this is pure cash without collateral
-                cash_margin = float(funds_data.get('availablecash', 0))
-                logger.debug(f"[CASH MARGIN] Cash margin for {account.account_name}: {cash_margin:,.2f}")
+                # availablecash includes collateral, so subtract collateral to get pure cash
+                available_cash = float(funds_data.get('availablecash', 0))
+                collateral = float(funds_data.get('collateral', 0))
+                cash_margin = available_cash - collateral
+                logger.debug(f"[CASH MARGIN] Cash margin for {account.account_name}: {cash_margin:,.2f} (availablecash={available_cash:,.2f} - collateral={collateral:,.2f})")
                 return cash_margin
             else:
                 logger.warning(f"[CASH MARGIN] API call failed, using cached data")
                 # Fallback to cached data
                 if account.last_funds_data:
-                    cash_margin = float(account.last_funds_data.get('availablecash', 0))
+                    available_cash = float(account.last_funds_data.get('availablecash', 0))
+                    collateral = float(account.last_funds_data.get('collateral', 0))
+                    cash_margin = available_cash - collateral
                     logger.debug(f"[CASH MARGIN] Using cached cash margin: {cash_margin:,.2f}")
                     return cash_margin
                 return 0
