@@ -783,6 +783,8 @@ class StrategyExecutor:
                                 if attempt < max_retries - 1:
                                     import time as time_sleep
                                     db.session.rollback()
+                                    # Re-add execution after rollback (rollback expels it from session)
+                                    db.session.add(execution)
                                     wait_time = 0.1 * (2 ** attempt)  # Exponential backoff: 0.1, 0.2, 0.4, 0.8, 1.6 seconds
                                     logger.debug(f"DB locked, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
                                     time_sleep.sleep(wait_time)
@@ -792,12 +794,15 @@ class StrategyExecutor:
                                     raise
 
                         # PHASE 2: Add order to background poller for status tracking
-                        order_status_poller.add_order(
-                            execution_id=execution.id,
-                            account=account,
-                            order_id=order_id,
-                            strategy_name=self.strategy.name
-                        )
+                        if execution.id is not None:
+                            order_status_poller.add_order(
+                                execution_id=execution.id,
+                                account=account,
+                                order_id=order_id,
+                                strategy_name=self.strategy.name
+                            )
+                        else:
+                            logger.error(f"[DB ERROR] Execution ID is None after commit for {account_name} order {order_id} - record may not have been saved!")
 
                         # Report as pending - background poller will update status
                         results.append({
@@ -810,7 +815,7 @@ class StrategyExecutor:
                             'leg': leg.leg_number
                         })
 
-                        logger.debug(f"[THREAD SUCCESS] Leg {leg.leg_number} order placed on {account_name}, order_id: {order_id} (polling in background)")
+                        logger.debug(f"[THREAD SUCCESS] Leg {leg.leg_number} order placed on {account_name}, order_id: {order_id}, execution_id: {execution.id} (polling in background)")
 
                 else:
                     # Order failed - create execution record for visibility and tracking
