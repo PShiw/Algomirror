@@ -116,10 +116,13 @@ def get_account_funds(account_id):
         if response.get('status') == 'success':
             funds_data = response.get('data', {})
 
-            # Cache the data
-            account.last_funds_data = funds_data
-            account.last_data_update = datetime.utcnow()
-            db.session.commit()
+            # Cache the data (non-blocking - don't hold up reads if DB is busy)
+            try:
+                account.last_funds_data = funds_data
+                account.last_data_update = datetime.utcnow()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
             return no_cache_response({
                 'status': 'success',

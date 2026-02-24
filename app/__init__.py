@@ -130,6 +130,17 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     csrf.init_app(app)
 
+    # Enable WAL mode for SQLite - allows concurrent reads during writes
+    # Without this, any DB write blocks ALL reads, causing 504 timeouts
+    if 'sqlite' in app.config.get('SQLALCHEMY_DATABASE_URI', ''):
+        from sqlalchemy import event
+        def set_sqlite_wal_mode(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.close()
+        with app.app_context():
+            event.listen(db.engine, "connect", set_sqlite_wal_mode)
+
     # Configure session to use database if sqlalchemy type
     if app.config.get('SESSION_TYPE') == 'sqlalchemy':
         app.config['SESSION_SQLALCHEMY'] = db

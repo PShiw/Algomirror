@@ -767,55 +767,59 @@ class StrategyExecutor:
                         entry_price=initial_entry_price  # Set to limit price for LIMIT orders, None for MARKET
                     )
 
-                    with self.lock:
-                        db.session.add(execution)
+                    # Each thread has its own scoped session - commit independently
+                    # No Python lock needed for DB ops (SQLite handles write serialization via WAL)
+                    db.session.add(execution)
 
-                        # Note: leg.is_executed is set in main session after all threads complete
-                        # This avoids session conflicts between threads
+                    # Retry commit with exponential backoff for SQLite locks
+                    max_retries = 5
+                    committed = False
+                    for attempt in range(max_retries):
+                        try:
+                            db.session.commit()
+                            committed = True
+                            print(f"[DB COMMIT] Leg {leg.leg_number}, account={account_name}: execution saved (id={execution.id})", flush=True)
+                            break
+                        except Exception as commit_error:
+                            if attempt < max_retries - 1:
+                                import time as time_sleep
+                                db.session.rollback()
+                                # Re-add execution after rollback (rollback expels it from session)
+                                db.session.add(execution)
+                                wait_time = 0.2 * (2 ** attempt)  # 0.2, 0.4, 0.8, 1.6, 3.2 seconds
+                                print(f"[DB RETRY] Leg {leg.leg_number}, account={account_name}: DB locked, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s", flush=True)
+                                time_sleep.sleep(wait_time)
+                            else:
+                                logger.error(f"Failed to commit after {max_retries} attempts: {commit_error}")
+                                print(f"[DB FAILED] Leg {leg.leg_number}, account={account_name}: commit failed after {max_retries} retries: {commit_error}", flush=True)
+                                db.session.rollback()
+                                raise
 
-                        # Retry commit with exponential backoff for SQLite locks
-                        max_retries = 5
-                        for attempt in range(max_retries):
-                            try:
-                                db.session.commit()
-                                break
-                            except Exception as commit_error:
-                                if attempt < max_retries - 1:
-                                    import time as time_sleep
-                                    db.session.rollback()
-                                    # Re-add execution after rollback (rollback expels it from session)
-                                    db.session.add(execution)
-                                    wait_time = 0.1 * (2 ** attempt)  # Exponential backoff: 0.1, 0.2, 0.4, 0.8, 1.6 seconds
-                                    logger.debug(f"DB locked, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                                    time_sleep.sleep(wait_time)
-                                else:
-                                    logger.error(f"Failed to commit after {max_retries} attempts: {commit_error}")
-                                    db.session.rollback()
-                                    raise
+                    # PHASE 2: Add order to background poller for status tracking
+                    if committed and execution.id is not None:
+                        order_status_poller.add_order(
+                            execution_id=execution.id,
+                            account=account,
+                            order_id=order_id,
+                            strategy_name=self.strategy.name
+                        )
+                    elif not committed:
+                        logger.error(f"[DB ERROR] Commit failed for {account_name} order {order_id}")
+                    else:
+                        logger.error(f"[DB ERROR] Execution ID is None after commit for {account_name} order {order_id} - record may not have been saved!")
 
-                        # PHASE 2: Add order to background poller for status tracking
-                        if execution.id is not None:
-                            order_status_poller.add_order(
-                                execution_id=execution.id,
-                                account=account,
-                                order_id=order_id,
-                                strategy_name=self.strategy.name
-                            )
-                        else:
-                            logger.error(f"[DB ERROR] Execution ID is None after commit for {account_name} order {order_id} - record may not have been saved!")
+                    # Report as pending - background poller will update status
+                    results.append({
+                        'account': account_name,
+                        'symbol': symbol,
+                        'order_id': order_id,
+                        'status': 'pending',
+                        'message': 'Order placed, checking status in background',
+                        'order_status': 'open',
+                        'leg': leg.leg_number
+                    })
 
-                        # Report as pending - background poller will update status
-                        results.append({
-                            'account': account_name,
-                            'symbol': symbol,
-                            'order_id': order_id,
-                            'status': 'pending',
-                            'message': 'Order placed, checking status in background',
-                            'order_status': 'open',
-                            'leg': leg.leg_number
-                        })
-
-                        logger.debug(f"[THREAD SUCCESS] Leg {leg.leg_number} order placed on {account_name}, order_id: {order_id}, execution_id: {execution.id} (polling in background)")
+                    print(f"[THREAD SUCCESS] Leg {leg.leg_number}, account={account_name}: order_id={order_id}, execution_id={execution.id}", flush=True)
 
                 else:
                     # Order failed - create execution record for visibility and tracking
@@ -839,38 +843,34 @@ class StrategyExecutor:
                             error_message=error_msg[:500]  # Store error (truncate if too long)
                         )
 
-                        with self.lock:
-                            db.session.add(failed_execution)
-                            # Try to commit, but don't fail if it doesn't work
-                            try:
-                                db.session.commit()
-                                logger.debug(f"[FAILED ORDER TRACKED] Created execution record for failed order on {account_name}")
-                            except Exception as commit_error:
-                                logger.warning(f"Could not commit failed execution record: {commit_error}")
-                                db.session.rollback()
+                        db.session.add(failed_execution)
+                        try:
+                            db.session.commit()
+                        except Exception as commit_error:
+                            logger.warning(f"Could not commit failed execution record: {commit_error}")
+                            db.session.rollback()
 
                     except Exception as tracking_error:
                         logger.warning(f"Could not create tracking record for failed order: {tracking_error}")
 
-                    with self.lock:
-                        results.append({
-                            'account': account_name,
-                            'symbol': symbol,
-                            'status': 'failed',
-                            'error': error_msg,
-                            'leg': leg.leg_number
-                        })
+                    results.append({
+                        'account': account_name,
+                        'symbol': symbol,
+                        'status': 'failed',
+                        'error': error_msg,
+                        'leg': leg.leg_number
+                    })
 
             except Exception as e:
                 logger.error(f"[THREAD ERROR] Error executing leg {leg.leg_number} on account {account_name}: {e}", exc_info=True)
-                with self.lock:
-                    results.append({
-                        'account': account_name if 'account_name' in locals() else 'unknown',
-                        'symbol': symbol,
-                        'status': 'error',
-                        'error': str(e),
-                        'leg': leg.leg_number
-                    })
+                print(f"[THREAD ERROR] Leg {leg.leg_number}, account={account_name if 'account_name' in locals() else 'unknown'}: {e}", flush=True)
+                results.append({
+                    'account': account_name if 'account_name' in locals() else 'unknown',
+                    'symbol': symbol,
+                    'status': 'error',
+                    'error': str(e),
+                    'leg': leg.leg_number
+                })
 
         logger.debug(f"[THREAD END] Completed execution for leg {leg.leg_number} on account {account_name}")
 
