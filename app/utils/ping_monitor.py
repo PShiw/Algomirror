@@ -198,6 +198,12 @@ class PingMonitor:
                     current_app.logger.warning(f"Ping check failed for account {account.id}: {str(e)}")
                 elif failure_count == 1:  # Log first failure even in quiet mode
                     current_app.logger.debug(f"Account {account.id} connection failed, will retry {max_failures - 1} more times")
+            finally:
+                # Release any read locks between account checks so writers aren't blocked
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
     
     def _update_account_status(self, account, status, message=None):
         """Update account connection status in database"""

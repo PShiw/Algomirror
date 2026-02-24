@@ -174,6 +174,11 @@ class OrderStatusPoller:
         with app.app_context():
             for execution_id, order_info in account_orders:
                 self._check_order_status(execution_id, order_info, app)
+                # Release any read locks between order checks so writers aren't blocked
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
 
     def _check_order_status(self, execution_id: int, order_info: Dict, app):
         """Check status of a single order"""

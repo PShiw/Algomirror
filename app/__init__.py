@@ -26,6 +26,20 @@ csrf = CSRFProtect()
 sess = Session()
 limiter = None
 
+# Enable WAL mode for ALL SQLite connections (class-level, fires for every connection)
+# WAL allows concurrent reads during writes - prevents 504 timeouts
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    import sqlite3
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")  # 5s timeout instead of 30s
+        cursor.close()
+
 def setup_logging(app):
     """Set up centralized logging with JSON format"""
 
@@ -130,17 +144,6 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     csrf.init_app(app)
 
-    # Enable WAL mode for SQLite - allows concurrent reads during writes
-    # Without this, any DB write blocks ALL reads, causing 504 timeouts
-    if 'sqlite' in app.config.get('SQLALCHEMY_DATABASE_URI', ''):
-        from sqlalchemy import event
-        def set_sqlite_wal_mode(dbapi_connection, connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.close()
-        with app.app_context():
-            event.listen(db.engine, "connect", set_sqlite_wal_mode)
-
     # Configure session to use database if sqlalchemy type
     if app.config.get('SESSION_TYPE') == 'sqlalchemy':
         app.config['SESSION_SQLALCHEMY'] = db
@@ -151,6 +154,14 @@ def create_app(config_name=None):
     with app.app_context():
         from app import models
         db.create_all()
+
+        # Verify WAL mode is active (should print "wal" on startup)
+        if 'sqlite' in app.config.get('SQLALCHEMY_DATABASE_URI', ''):
+            from sqlalchemy import text
+            result = db.session.execute(text("PRAGMA journal_mode"))
+            mode = result.scalar()
+            print(f"[SQLite] Journal mode: {mode}", flush=True)
+            db.session.rollback()  # Don't leave open transaction
     
     # Initialize rate limiter
     from app.utils.rate_limiter import init_rate_limiter

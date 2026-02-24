@@ -28,9 +28,10 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # SQLite-specific settings for handling locks
+    # WAL mode is set via engine event listener in app/__init__.py
     SQLALCHEMY_ENGINE_OPTIONS = {
         'connect_args': {
-            'timeout': 30  # Wait up to 30 seconds for locks to clear
+            'timeout': 5  # 5 seconds lock wait (WAL mode makes this rarely needed)
         },
         'pool_pre_ping': True,  # Verify connections before using
         'pool_recycle': 3600,   # Recycle connections every hour
