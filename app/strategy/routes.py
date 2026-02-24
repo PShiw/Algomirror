@@ -326,7 +326,9 @@ def builder(strategy_id=None):
 @login_required
 @api_rate_limit()
 def execute_strategy(strategy_id):
-    """Execute a strategy across selected accounts"""
+    """Execute a strategy across selected accounts (async - returns immediately)"""
+    import threading
+
     try:
         strategy = Strategy.query.filter_by(
             id=strategy_id,
@@ -363,6 +365,17 @@ def execute_strategy(strategy_id):
                 'message': 'No accounts selected for strategy'
             }), 400
 
+        # Guard against duplicate execution - check for pending executions
+        pending_count = StrategyExecution.query.filter_by(
+            strategy_id=strategy_id,
+            status='pending'
+        ).count()
+        if pending_count > 0:
+            return jsonify({
+                'status': 'warning',
+                'message': f'Strategy already has {pending_count} pending order(s). Wait for them to complete before executing again.'
+            }), 400
+
         logger.debug(f"Executing strategy {strategy_id} ({strategy.name}): {len(unexecuted_legs)} unexecuted legs out of {leg_count} total")
 
         # Check if risk profile is set to fixed lot size
@@ -387,77 +400,70 @@ def execute_strategy(strategy_id):
                 }), 400
             use_margin_calc = False
             logger.debug(f"[EXEC DEBUG] Strategy {strategy_id}: Risk profile is 'Fixed Lot Size', using explicit lot sizes")
-            for leg in unexecuted_legs:
-                logger.debug(f"[EXEC DEBUG] Leg {leg.leg_number}: {leg.instrument} {leg.action} - {leg.lots} lots")
         else:
             # Margin-based profiles: use MarginCalculator
             use_margin_calc = True
             logger.debug(f"[EXEC DEBUG] Strategy {strategy_id}: Using MarginCalculator with risk profile '{strategy.risk_profile}'")
-            for leg in unexecuted_legs:
-                logger.debug(f"[EXEC DEBUG] Leg {leg.leg_number}: {leg.instrument} {leg.action} - lots will be calculated dynamically")
 
-        # Initialize strategy executor
-        logger.debug(f"[EXEC DEBUG] Initializing StrategyExecutor...")
-        executor = StrategyExecutor(strategy, use_margin_calculator=use_margin_calc)
+        # Capture values for background thread
+        app = current_app._get_current_object()
+        captured_strategy_id = strategy_id
+        captured_use_margin_calc = use_margin_calc
+        captured_has_trailing_sl = bool(strategy.trailing_sl and strategy.trailing_sl > 0)
+        num_accounts = len(strategy.selected_accounts)
 
-        # CRITICAL: Reset TSL tracking BEFORE execution starts
-        # This prevents stale TSL data from previous trades from triggering exits
-        # TSL State: RESET -> WAITING -> ACTIVE -> TRIGGERED -> EXIT
-        if strategy.trailing_sl and strategy.trailing_sl > 0:
-            logger.debug(f"[TSL STATE] Strategy {strategy.id} ({strategy.name}): RESET - Clearing TSL for new entry")
-            strategy.trailing_sl_active = False
-            strategy.trailing_sl_peak_pnl = 0.0
-            strategy.trailing_sl_initial_stop = None
-            strategy.trailing_sl_trigger_pnl = None
-            strategy.trailing_sl_triggered_at = None
-            strategy.trailing_sl_exit_reason = None
-            db.session.commit()
-            logger.debug(f"[TSL STATE] Strategy {strategy.id} ({strategy.name}): State = WAITING (monitoring for P&L > 0)")
+        def run_execution_async():
+            """Execute strategy in background thread to prevent HTTP timeout"""
+            with app.app_context():
+                try:
+                    # Re-query strategy in fresh session (request session is closed)
+                    strat = Strategy.query.get(captured_strategy_id)
+                    if not strat:
+                        print(f"[ASYNC EXEC] Strategy {captured_strategy_id} not found", flush=True)
+                        return
 
-        # Execute strategy
-        logger.debug(f"[EXEC DEBUG] Executing strategy...")
-        results = executor.execute()
-        logger.debug(f"[EXEC DEBUG] Execution complete. Results count: {len(results)}")
+                    # Reset TSL tracking before execution
+                    if captured_has_trailing_sl:
+                        logger.debug(f"[TSL STATE] Strategy {strat.id} ({strat.name}): RESET - Clearing TSL for new entry")
+                        strat.trailing_sl_active = False
+                        strat.trailing_sl_peak_pnl = 0.0
+                        strat.trailing_sl_initial_stop = None
+                        strat.trailing_sl_trigger_pnl = None
+                        strat.trailing_sl_triggered_at = None
+                        strat.trailing_sl_exit_reason = None
+                        db.session.commit()
 
-        # Count successful, failed, and skipped executions
-        # With Phase 2: 'pending' means order placed successfully, being tracked in background
-        successful = sum(1 for r in results if r.get('status') in ['success', 'pending'])
-        failed = sum(1 for r in results if r.get('status') in ['failed', 'error'])
-        skipped = sum(1 for r in results if r.get('status') == 'skipped')
+                    # Create executor in background thread's own session
+                    executor = StrategyExecutor(strat, use_margin_calculator=captured_use_margin_calc)
 
-        # Determine overall status and message
-        if successful == 0 and skipped > 0:
-            # All orders were skipped
-            overall_status = 'warning'
-            message = f'Strategy execution skipped: Insufficient margin for all {skipped} orders'
-        elif successful == 0 and failed > 0:
-            # All orders failed
-            overall_status = 'error'
-            message = f'Strategy execution failed: All {failed} orders failed'
-        elif successful > 0 and (failed > 0 or skipped > 0):
-            # Mixed results
-            overall_status = 'partial'
-            message = f'Strategy partially executed: {successful} successful, {failed} failed, {skipped} skipped'
-        elif successful > 0:
-            # All successful
-            overall_status = 'success'
-            message = f'Strategy executed successfully: {successful} order(s) placed and being tracked'
-        else:
-            # No orders processed
-            overall_status = 'error'
-            message = 'No orders were processed'
+                    # Execute (this blocks until all threads complete - but that's OK, we're in background)
+                    results = executor.execute()
+
+                    # Log completion
+                    successful = sum(1 for r in results if r.get('status') in ['success', 'pending'])
+                    failed = sum(1 for r in results if r.get('status') in ['failed', 'error'])
+                    skipped = sum(1 for r in results if r.get('status') == 'skipped')
+                    print(f"[ASYNC EXEC DONE] Strategy {captured_strategy_id}: {successful} success, {failed} failed, {skipped} skipped", flush=True)
+                    logger.debug(f"[ASYNC EXEC] Strategy {captured_strategy_id} completed: {successful} success, {failed} failed, {skipped} skipped")
+
+                except Exception as e:
+                    print(f"[ASYNC EXEC ERROR] Strategy {captured_strategy_id}: {e}", flush=True)
+                    logger.error(f"[ASYNC EXEC] Strategy {captured_strategy_id} failed: {e}", exc_info=True)
+
+        # Start execution in background thread - return immediately
+        exec_thread = threading.Thread(
+            target=run_execution_async,
+            daemon=True,
+            name=f"StrategyExec-{strategy_id}"
+        )
+        exec_thread.start()
 
         return jsonify({
-            'status': overall_status,
-            'message': message,
-            'results': results,
+            'status': 'success',
+            'message': f'Strategy execution started: {len(unexecuted_legs)} leg(s) across {num_accounts} account(s). Positions will appear shortly.',
             'summary': {
                 'total_legs': leg_count,
-                'accounts': len(strategy.selected_accounts),
-                'successful_orders': successful,
-                'failed_orders': failed,
-                'skipped_orders': skipped,
-                'total_attempts': len(results)
+                'accounts': num_accounts
             }
         })
 
