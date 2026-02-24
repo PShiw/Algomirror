@@ -208,46 +208,64 @@ def get_account_pnl(account_id):
         unrealized_pnl = 0
         open_positions = 0
 
-        try:
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
+        # Collect open executions
+        open_executions = [e for e in today_executions if e.status == 'entered' and e.entry_price]
+        open_positions = len(open_executions)
 
-            for execution in today_executions:
-                if execution.status == 'entered' and execution.entry_price:
-                    open_positions += 1
+        if open_executions:
+            # Build LTP cache - try WebSocket first (instant), then API fallback
+            ltp_cache = {}
+            unique_symbols = set((e.symbol, e.exchange) for e in open_executions)
 
-                    # Get current LTP for this position
-                    try:
-                        quote = client.quotes(symbol=execution.symbol, exchange=execution.exchange)
-                        if quote.get('status') == 'success':
-                            ltp = float(quote.get('data', {}).get('ltp', execution.entry_price))
+            # Try WebSocket LTP cache first (no API calls needed)
+            try:
+                from app.utils.background_service import option_chain_service
+                if option_chain_service.shared_websocket_manager:
+                    ws_data = option_chain_service.shared_websocket_manager.get_ltp()
+                    ws_ltp_data = ws_data.get('ltp', {})
+                    for symbol, exchange in unique_symbols:
+                        ws_key = f"{exchange}:{symbol}"
+                        if ws_key in ws_ltp_data:
+                            ltp_cache[(symbol, exchange)] = float(ws_ltp_data[ws_key])
+            except Exception:
+                pass
 
-                            # Calculate P&L based on action
-                            if execution.leg.action == 'BUY':
-                                pnl = (ltp - execution.entry_price) * execution.quantity
-                            else:  # SELL
-                                pnl = (execution.entry_price - ltp) * execution.quantity
+            # API fallback only for symbols not in WebSocket cache
+            symbols_needing_api = [(s, e) for s, e in unique_symbols if (s, e) not in ltp_cache]
+            if symbols_needing_api:
+                try:
+                    client = ExtendedOpenAlgoAPI(
+                        api_key=account.get_api_key(),
+                        host=account.host_url
+                    )
+                    for symbol, exchange in symbols_needing_api:
+                        try:
+                            quote = client.quotes(symbol=symbol, exchange=exchange)
+                            if quote.get('status') == 'success':
+                                ltp_cache[(symbol, exchange)] = float(quote.get('data', {}).get('ltp', 0))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-                            # Update unrealized P&L in database
-                            execution.unrealized_pnl = pnl
-                            unrealized_pnl += pnl
-                        else:
-                            # Use cached unrealized P&L if quote fails
-                            unrealized_pnl += execution.unrealized_pnl or 0
-                    except Exception as e_quote:
-                        # Use cached unrealized P&L on error
-                        unrealized_pnl += execution.unrealized_pnl or 0
+            # Calculate P&L for each open position using cached LTPs
+            for execution in open_executions:
+                ltp = ltp_cache.get((execution.symbol, execution.exchange), 0)
+                if ltp > 0:
+                    if execution.leg.action == 'BUY':
+                        pnl = (ltp - execution.entry_price) * execution.quantity
+                    else:
+                        pnl = (execution.entry_price - ltp) * execution.quantity
+                    execution.unrealized_pnl = pnl
+                    unrealized_pnl += pnl
+                else:
+                    # Use cached unrealized P&L if no LTP available
+                    unrealized_pnl += execution.unrealized_pnl or 0
 
-            # Commit updated unrealized P&L to database
-            db.session.commit()
-
-        except Exception as e_client:
-            # Fallback to cached unrealized P&L if client fails
-            unrealized_pnl = sum(e.unrealized_pnl or 0 for e in today_executions
-                                if e.status == 'entered' and e.unrealized_pnl)
-            open_positions = sum(1 for e in today_executions if e.status == 'entered')
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         # Total P&L
         total_pnl = realized_pnl + unrealized_pnl

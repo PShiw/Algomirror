@@ -427,7 +427,6 @@ function confirmExecuteStrategy() {
             // Manually refresh data immediately
             loadStrategyMetrics();
             loadAccountFunds();
-            loadAccountPnL();
             loadStrategyPnL();
             setTimeout(() => location.reload(), 1500);
         } else if (data.status === 'warning') {
@@ -452,23 +451,31 @@ function manualRefresh() {
     showNotification('Refreshing data...', 'info');
     loadStrategyMetrics();
     loadAccountFunds();
-    loadAccountPnL();
     loadStrategyPnL();
 }
 
-// Load strategy positions and P&L data
+// Load strategy positions and P&L data - PARALLEL fetching for all strategies
 async function loadStrategyMetrics() {
     const strategies = {{ strategies_json|tojson }};
 
-    for (const strategy of strategies) {
-        try {
-            // Load positions for position count
-            const posResponse = await fetch(`/strategy/${strategy.id}/positions`);
-            const posData = await posResponse.json();
+    // Fetch ALL strategies in PARALLEL instead of sequential await loop
+    const fetchPromises = strategies.map(strategy =>
+        fetch(`/strategy/${strategy.id}/positions`, { signal: AbortSignal.timeout(10000) })
+            .then(response => response.json())
+            .then(posData => ({ strategy, posData, success: true }))
+            .catch(error => ({ strategy, error, success: false }))
+    );
 
+    const results = await Promise.allSettled(fetchPromises);
+
+    for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const { strategy, posData, success } = result.value;
+
+        try {
             let positionCount = 0;
 
-            if (posData.status === 'success' && posData.data) {
+            if (success && posData.status === 'success' && posData.data) {
                 const positions = posData.data || [];
 
                 // Count only OPEN positions (exclude closed positions with qty=0)
@@ -507,7 +514,7 @@ async function loadStrategyMetrics() {
                 pnlElement.className = totalPnl >= 0 ? 'font-semibold text-success' : 'font-semibold text-error';
             }
         } catch (error) {
-            console.error(`Error loading metrics for strategy ${strategy.id}:`, error);
+            console.error(`Error processing metrics for strategy ${strategy.id}:`, error);
         }
     }
 }
@@ -549,15 +556,16 @@ async function confirmClosePositions() {
     currentStrategyId = null;
 }
 
-// Load account funds data - fetch all accounts in PARALLEL for faster loading
+// Load account funds AND P&L data in a SINGLE parallel fetch (eliminates duplicate API calls)
 async function loadAccountFunds() {
     const accounts = {{ accounts_json|tojson }};
     let totalCash = 0;
+    let totalM2MPnL = 0;
 
     // Add cache-busting timestamp to prevent stale data
     const timestamp = Date.now();
 
-    // Fetch all accounts in parallel using Promise.allSettled
+    // Fetch all accounts in parallel using Promise.allSettled - ONE call per account
     const fetchPromises = accounts.map(account =>
         fetch(`/api/accounts/${account.id}/funds?_t=${timestamp}`, { signal: AbortSignal.timeout(10000) })
             .then(response => response.json())
@@ -567,7 +575,7 @@ async function loadAccountFunds() {
 
     const results = await Promise.allSettled(fetchPromises);
 
-    // Process results
+    // Process results - update BOTH funds AND P&L from same response
     for (const result of results) {
         if (result.status === 'fulfilled') {
             const { account, data, success } = result.value;
@@ -575,6 +583,7 @@ async function loadAccountFunds() {
             if (success && data.status === 'success' && data.data) {
                 const funds = data.data;
 
+                // --- Funds section ---
                 const available = parseFloat(funds.availablecash) || 0;
                 const collateral = parseFloat(funds.collateral) || 0;
                 const cash = available - collateral;
@@ -596,67 +605,10 @@ async function loadAccountFunds() {
                 }
 
                 totalCash += cash;
-            } else {
-                const availableEl = document.getElementById(`available-${account.id}`);
-                const marginEl = document.getElementById(`margin-${account.id}`);
-                const cashEl = document.getElementById(`cash-${account.id}`);
 
-                if (availableEl) availableEl.textContent = '₹0.00L';
-                if (marginEl) marginEl.textContent = '₹0.00L';
-                if (cashEl) cashEl.textContent = '₹0.00L';
-            }
-        } else {
-            // Promise rejected
-            const account = accounts.find(a => results.indexOf(result) === accounts.indexOf(a));
-            console.error(`Error loading funds for account:`, result.reason);
-
-            if (account) {
-                const availableEl = document.getElementById(`available-${account.id}`);
-                const marginEl = document.getElementById(`margin-${account.id}`);
-                const cashEl = document.getElementById(`cash-${account.id}`);
-
-                if (availableEl) availableEl.textContent = 'Error';
-                if (marginEl) marginEl.textContent = 'Error';
-                if (cashEl) cashEl.textContent = 'Error';
-            }
-        }
-    }
-
-    // Update total cash
-    const totalCashEl = document.getElementById('total-available-cash');
-    if (totalCashEl) {
-        totalCashEl.textContent = `₹ ${formatInLakhs(totalCash)}`;
-    }
-}
-
-// Load account P&L data from broker's M2M (realized + unrealized) - fetch all accounts in PARALLEL
-async function loadAccountPnL() {
-    const accounts = {{ accounts_json|tojson }};
-    let totalM2MPnL = 0;
-
-    // Add cache-busting timestamp to prevent stale data
-    const timestamp = Date.now();
-
-    // Fetch all accounts' funds data in parallel (contains broker's M2M P&L)
-    const fetchPromises = accounts.map(account =>
-        fetch(`/api/accounts/${account.id}/funds?_t=${timestamp}`, { signal: AbortSignal.timeout(10000) })
-            .then(response => response.json())
-            .then(data => ({ account, data, success: true }))
-            .catch(error => ({ account, error, success: false }))
-    );
-
-    const results = await Promise.allSettled(fetchPromises);
-
-    // Process results
-    for (const result of results) {
-        if (result.status === 'fulfilled') {
-            const { account, data, success } = result.value;
-
-            if (success && data.status === 'success' && data.data) {
-                const fundsData = data.data;
-                // Calculate M2M P&L from broker's data (same as accounts/manage page)
-                const m2mRealized = parseFloat(fundsData.m2mrealized) || 0;
-                const m2mUnrealized = parseFloat(fundsData.m2munrealized) || 0;
+                // --- M2M P&L section (from same response, no extra API call) ---
+                const m2mRealized = parseFloat(funds.m2mrealized) || 0;
+                const m2mUnrealized = parseFloat(funds.m2munrealized) || 0;
                 const accountPnl = m2mRealized + m2mUnrealized;
 
                 const pnlEl = document.getElementById(`pnl-account-${account.id}`);
@@ -668,6 +620,14 @@ async function loadAccountPnL() {
                     totalM2MPnL += accountPnl;
                 }
             } else {
+                const availableEl = document.getElementById(`available-${account.id}`);
+                const marginEl = document.getElementById(`margin-${account.id}`);
+                const cashEl = document.getElementById(`cash-${account.id}`);
+
+                if (availableEl) availableEl.textContent = '₹0.00L';
+                if (marginEl) marginEl.textContent = '₹0.00L';
+                if (cashEl) cashEl.textContent = '₹0.00L';
+
                 const pnlEl = document.getElementById(`pnl-account-${account.id}`);
                 if (pnlEl) {
                     pnlEl.textContent = '₹0.00';
@@ -676,25 +636,21 @@ async function loadAccountPnL() {
             }
         } else {
             // Promise rejected
-            const account = accounts.find(a => results.indexOf(result) === accounts.indexOf(a));
-            console.error(`Error loading P&L for account:`, result.reason);
-
-            if (account) {
-                const pnlEl = document.getElementById(`pnl-account-${account.id}`);
-                if (pnlEl) {
-                    pnlEl.textContent = 'Error';
-                    pnlEl.className = 'font-bold text-error';
-                }
-            }
+            console.error(`Error loading funds for account:`, result.reason);
         }
     }
 
-    // Update total M2M P&L (sum of all accounts' broker-reported M2M)
+    // Update total cash
+    const totalCashEl = document.getElementById('total-available-cash');
+    if (totalCashEl) {
+        totalCashEl.textContent = `₹ ${formatInLakhs(totalCash)}`;
+    }
+
+    // Update total M2M P&L
     const totalPnlEl = document.getElementById('total-m2m-pnl');
     if (totalPnlEl) {
-        const sign = totalM2MPnL >= 0 ? '' : '';
         const colorClass = totalM2MPnL >= 0 ? 'text-success' : 'text-error';
-        totalPnlEl.textContent = `₹ ${sign}${totalM2MPnL.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        totalPnlEl.textContent = `₹ ${totalM2MPnL.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
         totalPnlEl.className = `stat-value ${colorClass}`;
     }
 }
@@ -768,7 +724,6 @@ async function checkTradingHours() {
                 } else {
                     loadStrategyMetrics();
                     loadAccountFunds();
-                    loadAccountPnL();
                     loadStrategyPnL();
                 }
             }
@@ -790,12 +745,11 @@ function startPolling() {
 
     loadStrategyMetrics();
     loadAccountFunds();
-    loadAccountPnL();
     loadStrategyPnL();
 
     pollingIntervals.metrics = setInterval(loadStrategyMetrics, 10000);  // 10 seconds
-    pollingIntervals.funds = setInterval(loadAccountFunds, 30000);       // 30 seconds
-    pollingIntervals.pnl = setInterval(() => { loadAccountPnL(); loadStrategyPnL(); }, 5000);  // 5 seconds
+    pollingIntervals.funds = setInterval(loadAccountFunds, 15000);       // 15 seconds (funds + M2M P&L combined)
+    pollingIntervals.pnl = setInterval(loadStrategyPnL, 10000);          // 10 seconds
 }
 
 // Stop polling intervals
