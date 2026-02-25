@@ -777,16 +777,17 @@ class SupertrendExitService:
                                 if not response:
                                     response = {'status': 'error', 'message': f'API error after {max_retries} retries'}
 
-                        # Re-fetch execution with lock to update order ID
-                        execution = StrategyExecution.query.with_for_update(nowait=False).get(exec_id)
+                        # Re-fetch execution to update
+                        execution = StrategyExecution.query.get(exec_id)
 
                         if response and response.get('status') == 'success':
                             order_id = response.get('orderid')
 
-                            # Update with the actual order ID
+                            # Update with the actual order ID and mark as exited immediately
                             execution.exit_order_id = order_id
-                            execution.broker_order_status = 'open'
-                            db.session.commit()  # Commit each execution to release row lock
+                            execution.status = 'exited'
+                            execution.broker_order_status = 'complete'
+                            db.session.commit()
                             success_count += 1
 
                             # Add exit order to polling queue
