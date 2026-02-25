@@ -278,13 +278,23 @@ with app.app_context():
     db.create_all()
     print("[INFO] Tables created")
 
+    # ============================================
+    # DISABLE FOREIGN KEY CHECKS FOR BULK LOAD
+    # ============================================
+    # This allows tables to be inserted in any order without FK violations
+    # PostgreSQL's session_replication_role=replica disables all triggers
+    # including FK constraint checks. We re-enable after migration.
+    print("[INFO] Disabling foreign key checks for bulk data load...")
+    db.session.execute(text("SET session_replication_role = replica"))
+    db.session.commit()
+
     # Clean up any data from previous failed migration attempts
     for tname in reversed(TABLE_ORDER):
         try:
             count = db.session.execute(text(f"SELECT COUNT(*) FROM {tname}")).scalar()
             if count > 0:
                 print(f"  [CLEAN] {tname}: removing {count} rows from previous attempt")
-                db.session.execute(text(f"DELETE FROM {tname}"))
+                db.session.execute(text(f"TRUNCATE TABLE {tname} CASCADE"))
         except Exception:
             pass
     db.session.commit()
@@ -351,6 +361,7 @@ with app.app_context():
         # Insert in batches
         batch_size = 100
         inserted = 0
+        errors = 0
 
         for i in range(0, len(rows), batch_size):
             batch = rows[i:i + batch_size]
@@ -389,15 +400,30 @@ with app.app_context():
                         inserted += 1
                     except Exception as row_error:
                         db.session.rollback()
-                        print(f"    [WARN] Skipping row in {table_name}: {row_error}")
+                        errors += 1
+                        if errors <= 3:  # Show first 3 errors per table
+                            print(f"    [WARN] Row error in {table_name}: {row_error}")
+                        elif errors == 4:
+                            print(f"    [WARN] Suppressing further errors for {table_name}...")
 
         db.session.commit()
         total_rows += inserted
         table_counts[table_name] = inserted
-        print(f"  [OK] {table_name}: {inserted}/{len(rows)} rows copied")
+        if errors > 0:
+            print(f"  [PARTIAL] {table_name}: {inserted}/{len(rows)} rows copied ({errors} errors)")
+        else:
+            print(f"  [OK] {table_name}: {inserted}/{len(rows)} rows copied")
 
     sqlite_conn.close()
     print(f"\n[INFO] Total rows copied: {total_rows}")
+
+    # ============================================
+    # RE-ENABLE FOREIGN KEY CHECKS
+    # ============================================
+    print("\n[INFO] Re-enabling foreign key checks...")
+    db.session.execute(text("SET session_replication_role = DEFAULT"))
+    db.session.commit()
+    print("[INFO] Foreign key checks re-enabled")
 
     # ============================================
     # RESET POSTGRESQL SEQUENCES
