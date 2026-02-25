@@ -63,24 +63,33 @@ if [ "$PG_ALREADY_INSTALLED" = false ]; then
     apt-get install -y -qq curl ca-certificates gnupg lsb-release >/dev/null 2>&1
 
     # Add official PostgreSQL APT repository
-    # Remove any stale key/list first
+    # Clean up any stale key/list from previous attempts
     rm -f /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    rm -f /etc/apt/keyrings/postgresql.gpg
     rm -f /etc/apt/sources.list.d/pgdg.list
-    install -d /usr/share/postgresql-common/pgdg
 
-    # Download and dearmor the GPG key (force overwrite)
+    # Use /etc/apt/keyrings/ (standard on Ubuntu 22.04+)
+    install -d -m 755 /etc/apt/keyrings
+
+    # Download GPG key and convert to binary format for apt
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /tmp/pgdg.asc
-    gpg --batch --yes --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc /tmp/pgdg.asc
-    rm -f /tmp/pgdg.asc
-
-    # If gpg --dearmor fails, try direct download of binary key
-    if [ ! -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc ]; then
-        log_message "GPG dearmor failed, trying direct key import..." "$YELLOW"
-        curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
-            tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+    if [ ! -s /tmp/pgdg.asc ]; then
+        log_message "Failed to download PostgreSQL GPG key" "$RED"
+        exit 1
     fi
+    gpg --batch --yes --dearmor -o /etc/apt/keyrings/postgresql.gpg /tmp/pgdg.asc 2>/dev/null
 
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+    # Fallback: if gpg --dearmor produced empty file, convert manually
+    if [ ! -s /etc/apt/keyrings/postgresql.gpg ]; then
+        log_message "gpg --dearmor failed, importing via apt-key as fallback..." "$YELLOW"
+        apt-key add /tmp/pgdg.asc 2>/dev/null
+        # Write sources list without signed-by (uses apt-key trust)
+        echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+    else
+        chmod 644 /etc/apt/keyrings/postgresql.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+    fi
+    rm -f /tmp/pgdg.asc
 
     # Install PostgreSQL 17
     apt-get update
