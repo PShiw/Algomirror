@@ -215,6 +215,16 @@ os.environ['DATABASE_URL'] = PG_URL
 # Import SQLAlchemy for direct SQLite access
 from sqlalchemy import create_engine, text, inspect
 
+# psycopg v3 requires explicit Jsonb wrapper for dict/list values
+# (unlike psycopg2 which auto-adapted dicts to JSON)
+try:
+    from psycopg.types.json import Jsonb
+    USE_JSONB_WRAPPER = True
+    print("[INFO] Using psycopg v3 Jsonb wrapper for JSON columns")
+except ImportError:
+    USE_JSONB_WRAPPER = False
+    print("[INFO] psycopg v3 Jsonb not available, using raw values")
+
 # Import Flask app (will use PG_URL from env)
 from app import create_app, db
 
@@ -372,6 +382,13 @@ with app.app_context():
         json_cols = JSON_COLUMNS.get(table_name, [])
         bool_cols = BOOLEAN_COLUMNS.get(table_name, [])
 
+        # Debug: show first row types for tables with JSON/bool columns
+        if json_cols or bool_cols:
+            first_row = dict(zip(columns, rows[0]))
+            type_info = {k: type(v).__name__ for k, v in first_row.items()
+                         if k in json_cols or k in bool_cols}
+            print(f"  [DEBUG] {table_name} first row types: {type_info}")
+
         # Build parameterized INSERT statement
         col_list = ', '.join([f'"{c}"' for c in columns])
         param_list = ', '.join([f':{c}' for c in columns])
@@ -395,14 +412,29 @@ with app.app_context():
                         row_dict[bool_col] = bool(row_dict[bool_col])
 
                 # Convert JSON text to Python objects for PostgreSQL
+                # psycopg v3 requires Jsonb() wrapper - raw dicts cause
+                # "cannot adapt type 'dict'" errors
                 for json_col in json_cols:
                     if json_col in row_dict and row_dict[json_col] is not None:
                         val = row_dict[json_col]
+                        # Parse JSON string to Python object first
                         if isinstance(val, str):
                             try:
-                                row_dict[json_col] = json.loads(val)
+                                val = json.loads(val)
                             except (json.JSONDecodeError, TypeError):
-                                pass  # Keep as-is if not valid JSON
+                                pass  # Keep as string if not valid JSON
+                        # Wrap dict/list in Jsonb for psycopg v3
+                        if USE_JSONB_WRAPPER and isinstance(val, (dict, list)):
+                            row_dict[json_col] = Jsonb(val)
+                        else:
+                            row_dict[json_col] = val
+
+                # Catch-all: wrap any remaining dict/list values in Jsonb
+                # (handles columns not explicitly listed in JSON_COLUMNS)
+                if USE_JSONB_WRAPPER:
+                    for key, val in row_dict.items():
+                        if isinstance(val, (dict, list)):
+                            row_dict[key] = Jsonb(val)
 
                 row_dicts.append(row_dict)
 
@@ -449,10 +481,11 @@ with app.app_context():
                 f'ALTER TABLE {fk["table"]} ADD CONSTRAINT "{fk["name"]}" '
                 f'FOREIGN KEY ({cols}) REFERENCES {fk["ref_table"]} ({ref_cols})'
             ))
+            db.session.commit()
         except Exception as e:
+            db.session.rollback()
             fk_errors += 1
             print(f"  [WARN] Could not re-create FK {fk['name']} on {fk['table']}: {e}")
-    db.session.commit()
     if fk_errors == 0:
         print("[INFO] All foreign key constraints restored")
     else:
