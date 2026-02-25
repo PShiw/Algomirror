@@ -85,7 +85,8 @@ def force_ping_check(account_id):
 @login_required
 @api_rate_limit()
 def get_account_funds(account_id):
-    """Get real-time funds data for specific account"""
+    """Get real-time funds data for specific account.
+    Returns cached data if fresh (< 30s) to avoid slow broker API calls."""
     try:
         from app.utils.openalgo_client import ExtendedOpenAlgoAPI
         from datetime import datetime
@@ -104,13 +105,36 @@ def get_account_funds(account_id):
                 'message': 'Account not found'
             }), 404
 
+        # Return cached data if fresh (< 30 seconds old)
+        # Avoids broker API call (~500ms-2s network latency) on every page load
+        if account.last_funds_data and account.last_data_update:
+            cache_age = (datetime.utcnow() - account.last_data_update).total_seconds()
+            if cache_age < 30:
+                cached_data = account.last_funds_data
+                return no_cache_response({
+                    'status': 'success',
+                    'data': {
+                        'account_id': account.id,
+                        'account_name': account.account_name,
+                        'broker_name': account.broker_name,
+                        'availablecash': cached_data.get('availablecash', 0),
+                        'collateral': cached_data.get('collateral', 0),
+                        'utiliseddebits': cached_data.get('utiliseddebits', 0),
+                        'used_margin': cached_data.get('utiliseddebits', 0),
+                        'net': cached_data.get('net', 0),
+                        'm2mrealized': cached_data.get('m2mrealized', 0),
+                        'm2munrealized': cached_data.get('m2munrealized', 0),
+                        'cached': True
+                    }
+                })
+
         # Create API client
         client = ExtendedOpenAlgoAPI(
             api_key=account.get_api_key(),
             host=account.host_url
         )
 
-        # Fetch real-time funds data
+        # Fetch real-time funds data (cache miss or stale)
         response = client.funds()
 
         if response.get('status') == 'success':
@@ -234,20 +258,31 @@ def get_account_pnl(account_id):
                 pass
 
             # API fallback only for symbols not in WebSocket cache
+            # OPTIMIZED: Parallel fetching instead of sequential (5 symbols * 500ms = 2.5s -> 500ms)
             symbols_needing_api = [(s, e) for s, e in unique_symbols if (s, e) not in ltp_cache]
             if symbols_needing_api:
                 try:
+                    import concurrent.futures
                     client = ExtendedOpenAlgoAPI(
                         api_key=account.get_api_key(),
                         host=account.host_url
                     )
-                    for symbol, exchange in symbols_needing_api:
+
+                    def fetch_quote(sym_exch):
+                        symbol, exchange = sym_exch
                         try:
                             quote = client.quotes(symbol=symbol, exchange=exchange)
                             if quote.get('status') == 'success':
-                                ltp_cache[(symbol, exchange)] = float(quote.get('data', {}).get('ltp', 0))
+                                return (symbol, exchange), float(quote.get('data', {}).get('ltp', 0))
                         except Exception:
                             pass
+                        return (symbol, exchange), 0
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(symbols_needing_api))) as executor:
+                        results = executor.map(fetch_quote, symbols_needing_api, timeout=5)
+                        for key, ltp in results:
+                            if ltp > 0:
+                                ltp_cache[key] = ltp
                 except Exception:
                     pass
 
