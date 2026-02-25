@@ -169,19 +169,28 @@ class OrderStatusPoller:
 
         IMPORTANT: This runs in a ThreadPoolExecutor thread which does NOT inherit
         the app context from the parent thread. We must create our own context here.
+
+        OPTIMIZED: Batches all DB commits per account instead of per-order.
+        With PostgreSQL, each commit is a TCP round-trip (~1-5ms). Batching
+        N orders into 1 commit eliminates N-1 round-trips per polling cycle.
         """
         # ThreadPoolExecutor threads need their own app context
         with app.app_context():
+            needs_commit = False
             for execution_id, order_info in account_orders:
-                self._check_order_status(execution_id, order_info, app)
-                # Release any read locks between order checks so writers aren't blocked
+                changed = self._check_order_status(execution_id, order_info, app)
+                if changed:
+                    needs_commit = True
+            # Single commit for all order status updates in this account
+            if needs_commit:
                 try:
+                    db.session.commit()
+                except Exception as e:
                     db.session.rollback()
-                except Exception:
-                    pass
+                    logger.error(f"[POLLER] Batch commit failed for account orders: {e}")
 
     def _check_order_status(self, execution_id: int, order_info: Dict, app):
-        """Check status of a single order"""
+        """Check status of a single order. Returns True if DB was modified (needs commit)."""
         account_key = f"{order_info['account_id']}_{order_info['account_name']}"
         order_id = order_info['order_id']
         strategy_name = order_info['strategy_name']
@@ -193,7 +202,7 @@ class OrderStatusPoller:
             time_since_last_check = (now - self.last_check_time[account_key]).total_seconds()
             if time_since_last_check < 1.0:
                 # Skip this check to respect rate limit
-                return
+                return False
 
         try:
             # Fetch order status
@@ -204,6 +213,7 @@ class OrderStatusPoller:
 
             response = client.orderstatus(order_id=order_id, strategy=strategy_name)
             self.last_check_time[account_key] = datetime.utcnow()
+            modified = False
 
             if response.get('status') == 'success':
                 data = response.get('data', {})
@@ -217,7 +227,7 @@ class OrderStatusPoller:
                     with self._lock:
                         self.pending_orders.pop(execution_id, None)
                     logger.warning(f"[WARNING] Execution {execution_id} not found in DB, removed from queue")
-                    return
+                    return False
 
                 # Update based on broker status
                 if broker_status == 'complete':
@@ -257,6 +267,7 @@ class OrderStatusPoller:
                             logger.error(f"[PRICE FAILED] Order {order_id} could not get average_price after 3 retries!")
 
                     if is_entry_order:
+                        modified = True
                         execution.status = 'entered'
                         execution.broker_order_status = 'complete'
                         # Only update entry_price if we have a valid average_price
@@ -271,8 +282,6 @@ class OrderStatusPoller:
                         if execution.leg and not execution.leg.is_executed:
                             execution.leg.is_executed = True
 
-                        db.session.commit()
-
                         # Notify PositionMonitor of new filled order
                         try:
                             position_monitor = get_position_monitor()
@@ -284,6 +293,7 @@ class OrderStatusPoller:
                         logger.info(f"[FILLED] Entry order {order_id} FILLED at Rs.{avg_price} ({order_info['account_name']})")
 
                     elif is_exit_order:
+                        modified = True
                         execution.status = 'exited'
                         execution.broker_order_status = 'complete'
                         # Only update exit_price if we have a valid average_price
@@ -302,8 +312,6 @@ class OrderStatusPoller:
                             if execution.unrealized_pnl:
                                 execution.realized_pnl = execution.unrealized_pnl
                         execution.exit_time = datetime.utcnow()
-
-                        db.session.commit()
 
                         # Notify PositionMonitor of position closure
                         try:
@@ -369,18 +377,17 @@ class OrderStatusPoller:
                                                 else:
                                                     execution.exit_price = float(trade_price)
                                             break
-                                    db.session.commit()
                                     with self._lock:
                                         self.pending_orders.pop(execution_id, None)
                                     logger.info(f"[SAVED] Order {order_id} recovered from {broker_status} to complete")
-                                    return  # Don't mark as failed
+                                    return True  # Don't mark as failed
                         except Exception as tb_error:
                             logger.warning(f"[TRADEBOOK CHECK] Failed to verify order {order_id}: {tb_error}")
 
                         # Order truly rejected/cancelled - mark as failed
+                        modified = True
                         execution.status = 'failed'
                         execution.broker_order_status = broker_status
-                        db.session.commit()
 
                         # Notify PositionMonitor of cancelled order
                         try:
@@ -397,13 +404,13 @@ class OrderStatusPoller:
                         logger.warning(f"[REJECTED] Order {order_id} confirmed {broker_status.upper()} after {rejected_count} checks ({order_info['account_name']})")
                     else:
                         # Keep in queue and check again
+                        modified = True
                         execution.broker_order_status = broker_status
-                        db.session.commit()
                         logger.warning(f"[PENDING VERIFY] Order {order_id} shows {broker_status} ({rejected_count}/3 checks) - will re-verify ({order_info['account_name']})")
 
                 else:  # Still 'open'
+                    modified = True
                     execution.broker_order_status = 'open'
-                    db.session.commit()
 
                     # Increment check count
                     with self._lock:
@@ -425,8 +432,11 @@ class OrderStatusPoller:
             else:
                 logger.warning(f"[WARNING] Failed to get status for order {order_id}: {response.get('message')}")
 
+            return modified
+
         except Exception as e:
             logger.error(f"[ERROR] Error checking order {order_id}: {e}")
+            return False
 
     def get_status(self):
         """Get current poller status (for monitoring)"""

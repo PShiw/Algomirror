@@ -67,17 +67,17 @@ class TradingAccount(db.Model):
     __tablename__ = 'trading_accounts'
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     account_name = db.Column(db.String(100), nullable=False)
     broker_name = db.Column(db.String(100), nullable=False)
-    
+
     # OpenAlgo connection details (encrypted)
     host_url = db.Column(db.String(500), nullable=False)
     websocket_url = db.Column(db.String(500), nullable=False)
     api_key_encrypted = db.Column(db.Text, nullable=False)
-    
+
     # Account status
-    is_active = db.Column(db.Boolean, default=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
     is_primary = db.Column(db.Boolean, default=False)
     last_connected = db.Column(db.DateTime)
     connection_status = db.Column(db.String(50), default='disconnected')
@@ -116,7 +116,7 @@ class ActivityLog(db.Model):
     __tablename__ = 'activity_logs'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Allow NULL for failed login attempts
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)  # Allow NULL for failed login attempts
     account_id = db.Column(db.Integer, db.ForeignKey('trading_accounts.id'), nullable=True)
     
     action = db.Column(db.String(100), nullable=False)
@@ -139,8 +139,8 @@ class Order(db.Model):
     __tablename__ = 'orders'
     
     id = db.Column(db.Integer, primary_key=True)
-    account_id = db.Column(db.Integer, db.ForeignKey('trading_accounts.id'), nullable=False)
-    
+    account_id = db.Column(db.Integer, db.ForeignKey('trading_accounts.id'), nullable=False, index=True)
+
     order_id = db.Column(db.String(100), nullable=False)
     symbol = db.Column(db.String(50), nullable=False)
     exchange = db.Column(db.String(20), nullable=False)
@@ -261,12 +261,12 @@ class Strategy(db.Model):
     __tablename__ = 'strategies'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     market_condition = db.Column(db.String(50))  # 'non_expiry', 'expiry', 'any'
     risk_profile = db.Column(db.String(50))  # 'fixed_lots' (default), 'balanced', 'conservative', 'aggressive'
-    is_active = db.Column(db.Boolean, default=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
     is_template = db.Column(db.Boolean, default=False)
 
     # Timing settings
@@ -461,8 +461,8 @@ class StrategyExecution(db.Model):
     __tablename__ = 'strategy_executions'
 
     id = db.Column(db.Integer, primary_key=True)
-    strategy_id = db.Column(db.Integer, db.ForeignKey('strategies.id'), nullable=False)
-    account_id = db.Column(db.Integer, db.ForeignKey('trading_accounts.id'), nullable=False)
+    strategy_id = db.Column(db.Integer, db.ForeignKey('strategies.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('trading_accounts.id'), nullable=False, index=True)
     leg_id = db.Column(db.Integer, db.ForeignKey('strategy_legs.id'), nullable=False)
 
     # Order details
@@ -476,7 +476,7 @@ class StrategyExecution(db.Model):
     quantity = db.Column(db.Integer)
 
     # Status tracking
-    status = db.Column(db.String(50))  # 'pending', 'entered', 'exited', 'stopped', 'error'
+    status = db.Column(db.String(50), index=True)  # 'pending', 'entered', 'exited', 'stopped', 'error'
     broker_order_status = db.Column(db.String(50))  # Actual status from broker: 'complete', 'open', 'rejected', etc.
     entry_time = db.Column(db.DateTime)
     exit_time = db.Column(db.DateTime)
@@ -555,8 +555,8 @@ class TradingSettings(db.Model):
     __tablename__ = 'trading_settings'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Fixed table name
-    symbol = db.Column(db.String(50), nullable=False)  # 'NIFTY', 'BANKNIFTY', 'SENSEX'
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)  # Fixed table name
+    symbol = db.Column(db.String(50), nullable=False, index=True)  # 'NIFTY', 'BANKNIFTY', 'SENSEX'
     lot_size = db.Column(db.Integer, nullable=False, default=25)  # Current month lot size
     next_month_lot_size = db.Column(db.Integer, nullable=True)  # Next month lot size (for new contracts with different lot size)
     freeze_quantity = db.Column(db.Integer, nullable=False, default=1800)

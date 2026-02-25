@@ -25,6 +25,7 @@ migrate = Migrate()
 csrf = CSRFProtect()
 sess = Session()
 limiter = None
+_registration_cache = {}  # Cached result for registration check (single-user app)
 
 # Enable WAL mode for ALL SQLite connections (class-level, fires for every connection)
 # WAL allows concurrent reads during writes - prevents 504 timeouts
@@ -225,12 +226,15 @@ def create_app(config_name=None):
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(tradingview_bp)  # url_prefix defined in blueprint (/tradingview)
 
-    # Context processor for global template variables
+    # Context processor for global template variables (cached - single-user app)
     @app.context_processor
     def inject_registration_status():
-        """Make registration_available variable available to all templates"""
-        from app.models import User
-        return dict(registration_available=(User.query.count() == 0))
+        """Make registration_available variable available to all templates.
+        Cached in-memory since this is a single-user app - value only changes on registration."""
+        if 'available' not in _registration_cache:
+            from app.models import User
+            _registration_cache['available'] = (User.query.count() == 0)
+        return dict(registration_available=_registration_cache['available'])
 
     # CSRF error handler - redirects to login with message when session expires
     @app.errorhandler(CSRFError)

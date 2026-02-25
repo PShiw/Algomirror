@@ -5,6 +5,7 @@ from app.models import TradingAccount, ActivityLog, User
 from openalgo import api
 from datetime import datetime
 from sqlalchemy import desc
+from sqlalchemy.orm import joinedload
 from app import db
 from app.utils.time_utils import format_timestamp_to_ist
 import json
@@ -220,7 +221,10 @@ def account_positions():
 
     for account in accounts:
         # Get all strategies with open positions for this account
-        open_executions = StrategyExecution.query.filter_by(
+        # Eager load strategy to avoid N+1 queries (each execution.strategy triggers a query)
+        open_executions = StrategyExecution.query.options(
+            joinedload(StrategyExecution.strategy)
+        ).filter_by(
             account_id=account.id,
             status='entered'
         ).join(Strategy).filter(

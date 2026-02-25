@@ -124,6 +124,10 @@ def register():
             db.session.add(user)
             db.session.commit()
 
+            # Invalidate registration cache (single-user app, registration now closed)
+            from app import _registration_cache
+            _registration_cache.clear()
+
             current_app.logger.debug(
                 f'First user registered: {user.username} (Admin)',
                 extra={

@@ -42,12 +42,13 @@ class Config:
             'pool_recycle': 3600,
         }
     else:
-        # PostgreSQL or other databases
+        # PostgreSQL or other databases - tuned for single-user app
         SQLALCHEMY_ENGINE_OPTIONS = {
             'pool_pre_ping': True,
             'pool_recycle': 3600,
-            'pool_size': 10,
-            'max_overflow': 20,
+            'pool_size': 5,
+            'max_overflow': 10,
+            'pool_timeout': 10,
         }
     
     # Session configuration
