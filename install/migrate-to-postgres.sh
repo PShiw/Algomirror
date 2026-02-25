@@ -33,6 +33,16 @@ ENV_FILE="$BASE_PATH/.env"
 VENV_PYTHON="$BASE_PATH/venv/bin/python"
 FLASK_CMD="$BASE_PATH/venv/bin/flask"
 
+# Detect project root (where config.py and app/ package live)
+if [ -f "$BASE_PATH/config.py" ]; then
+    PROJECT_ROOT="$BASE_PATH"
+elif [ -f "$BASE_PATH/app/config.py" ]; then
+    PROJECT_ROOT="$BASE_PATH/app"
+else
+    log_message "Could not find project root (config.py not found)" "$RED"
+    exit 1
+fi
+
 # Detect pip: UV-managed venvs don't have pip, use 'uv pip' instead
 export VIRTUAL_ENV="$BASE_PATH/venv"
 if [ -f "$BASE_PATH/venv/bin/pip" ]; then
@@ -177,7 +187,7 @@ log_message "SQLite backup created: $BACKUP_FILE" "$GREEN"
 # ============================================
 log_message "\nStarting data migration..." "$BLUE"
 
-cd "$BASE_PATH"
+cd "$PROJECT_ROOT"
 
 # Create the Python migration script
 cat > /tmp/algomirror_migrate.py << 'MIGRATE_SCRIPT'
@@ -422,8 +432,8 @@ MIGRATE_SCRIPT
 
 # Run the migration script with proper environment
 log_message "Running migration..." "$BLUE"
-cd "$BASE_PATH"
-PYTHONPATH="$BASE_PATH" \
+cd "$PROJECT_ROOT"
+PYTHONPATH="$PROJECT_ROOT" \
 ALGOMIRROR_PG_URL="$PG_URL" \
 ALGOMIRROR_SQLITE_DB="$SQLITE_DB" \
 $VENV_PYTHON /tmp/algomirror_migrate.py
@@ -443,7 +453,7 @@ fi
 # STAMP ALEMBIC VERSION
 # ============================================
 log_message "\nStamping Alembic migration version..." "$BLUE"
-cd "$BASE_PATH"
+cd "$PROJECT_ROOT"
 DATABASE_URL="$PG_URL" $FLASK_CMD db stamp head 2>/dev/null || true
 log_message "Alembic version stamped" "$GREEN"
 
