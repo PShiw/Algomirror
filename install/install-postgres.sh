@@ -63,13 +63,27 @@ if [ "$PG_ALREADY_INSTALLED" = false ]; then
     apt-get install -y -qq curl ca-certificates gnupg lsb-release >/dev/null 2>&1
 
     # Add official PostgreSQL APT repository
+    # Remove any stale key/list first
+    rm -f /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    rm -f /etc/apt/sources.list.d/pgdg.list
     install -d /usr/share/postgresql-common/pgdg
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc 2>/dev/null
+
+    # Download and dearmor the GPG key (force overwrite)
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /tmp/pgdg.asc
+    gpg --batch --yes --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc /tmp/pgdg.asc
+    rm -f /tmp/pgdg.asc
+
+    # If gpg --dearmor fails, try direct download of binary key
+    if [ ! -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc ]; then
+        log_message "GPG dearmor failed, trying direct key import..." "$YELLOW"
+        curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
+            tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+    fi
 
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
     # Install PostgreSQL 17
-    apt-get update -qq
+    apt-get update
     apt-get install -y postgresql-17 postgresql-client-17
     if [ $? -ne 0 ]; then
         log_message "Failed to install PostgreSQL 17" "$RED"
