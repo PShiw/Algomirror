@@ -425,12 +425,15 @@ class StrategyExecutor:
 
     def _execute_leg(self, leg: StrategyLeg) -> List[Dict[str, Any]]:
         """Execute a strategy leg across all accounts"""
+        import time as _t
+        _leg_t0 = _t.time()
         print(f"[LEG DEBUG] Executing leg {leg.leg_number}: {leg.instrument} {leg.product_type} "
               f"{leg.option_type} strike_selection={leg.strike_selection} offset={leg.strike_offset}")
         results = []
 
         # Build symbol based on leg configuration
         symbol = self._build_symbol(leg)
+        print(f"[TIMING] Leg {leg.leg_number} symbol build: {_t.time() - _leg_t0:.2f}s -> {symbol}")
 
         if not symbol:
             logger.error(f"Failed to build symbol for leg {leg.leg_number}")
@@ -445,7 +448,9 @@ class StrategyExecutor:
         logger.debug(f"Built symbol: {symbol} on exchange: {exchange}")
 
         # Calculate quantity per account (will be calculated per account if margin calculator is enabled)
+        _qty_t0 = _t.time()
         base_quantity = self._calculate_quantity(leg, len(self.accounts))
+        print(f"[TIMING] Leg {leg.leg_number} base qty calc: {_t.time() - _qty_t0:.2f}s -> qty={base_quantity}")
 
         if base_quantity <= 0 and not self.use_margin_calculator:
             logger.error(f"Invalid quantity calculated for leg {leg.leg_number}: {base_quantity}")
@@ -464,7 +469,27 @@ class StrategyExecutor:
         logger.debug(f"Executing leg {leg.leg_number} on {len(self.accounts)} accounts: {[a.account_name for a in self.accounts]}")
         print(f"[EXECUTE] Leg {leg.leg_number}: Processing {len(self.accounts)} accounts in batches of {BATCH_SIZE}")
 
-        # First, prepare all accounts with their quantities
+        # Pre-fetch margins for ALL accounts in parallel before calculating quantities
+        # This avoids sequential client.funds() API calls (5 accounts × 500ms = 2.5s → 500ms)
+        if self.use_margin_calculator:
+            import concurrent.futures
+            accounts_needing_margin = [a for a in self.accounts if a.id not in self.account_margins]
+            if accounts_needing_margin:
+                print(f"[MARGIN PRE-FETCH] Fetching margins for {len(accounts_needing_margin)} accounts in parallel...")
+                app = self.app
+
+                def fetch_margin(acct):
+                    with app.app_context():
+                        return acct.id, self._get_margin_for_account(acct)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(accounts_needing_margin))) as executor:
+                    for acct_id, margin in executor.map(fetch_margin, accounts_needing_margin):
+                        self.account_margins[acct_id] = margin
+
+                print(f"[MARGIN PRE-FETCH] Done - all margins cached")
+
+        # Prepare all accounts with their quantities (now uses cached margins, no API calls)
+        _prep_t0 = _t.time()
         for account in self.accounts:
             # Calculate quantity for this specific account if using margin calculator
             if self.use_margin_calculator:
@@ -483,6 +508,8 @@ class StrategyExecutor:
                 quantity = base_quantity
 
             accounts_to_process.append((account, quantity))
+
+        print(f"[TIMING] Leg {leg.leg_number} account prep: {_t.time() - _prep_t0:.2f}s -> {len(accounts_to_process)} accounts ready")
 
         # Process accounts in batches
         total_accounts = len(accounts_to_process)
@@ -2448,10 +2475,6 @@ class StrategyExecutor:
         def exit_position_worker(execution, thread_index, retry_attempt=0):
             """Worker to exit a single position with retry mechanism"""
             try:
-                # Staggered delay to prevent race conditions
-                if thread_index > 0 and retry_attempt == 0:
-                    sleep(thread_index * 0.3)
-
                 account = execution.account
                 if not account:
                     raise Exception("No account associated with execution")
@@ -2522,10 +2545,6 @@ class StrategyExecutor:
                     thread.join(timeout=THREAD_TIMEOUT)
                     if thread.is_alive():
                         logger.error(f"[EXIT TIMEOUT] Thread {thread.name} still running after {THREAD_TIMEOUT}s")
-
-                # Small delay between batches
-                if batch_end < total:
-                    sleep(0.2)
 
         # PHASE 1: Close SELL positions first (BUY close orders)
         if sell_positions:
@@ -2617,7 +2636,6 @@ class StrategyExecutor:
 
                 # Check which ones succeeded now
                 failed_results = [r for r in results if r.get('status') == 'error']
-                sleep(0.5)
 
         return results
 
@@ -2720,8 +2738,8 @@ class StrategyExecutor:
 
                         # If exit price is missing/zero, wait and re-fetch
                         if not exit_avg_price or exit_avg_price == 0:
-                            logger.warning(f"[EXIT] Exit price missing for {exec_symbol}, waiting 3s to re-fetch...")
-                            sleep(3)
+                            logger.warning(f"[EXIT] Exit price missing for {exec_symbol}, waiting 1s to re-fetch...")
+                            sleep(1)
 
                             retry_response = client.orderstatus(
                                 order_id=exit_order_id,
