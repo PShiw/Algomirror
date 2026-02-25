@@ -281,12 +281,31 @@ with app.app_context():
     # ============================================
     # DISABLE FOREIGN KEY CHECKS FOR BULK LOAD
     # ============================================
-    # This allows tables to be inserted in any order without FK violations
-    # PostgreSQL's session_replication_role=replica disables all triggers
-    # including FK constraint checks. We re-enable after migration.
-    print("[INFO] Disabling foreign key checks for bulk data load...")
-    db.session.execute(text("SET session_replication_role = replica"))
+    # Drop all FK constraints before loading data, then re-create after.
+    # This avoids insertion order issues and doesn't require superuser.
+    print("[INFO] Dropping foreign key constraints for bulk data load...")
+    fk_constraints = []
+    pg_inspector = inspect(db.engine)
+    for tname in TABLE_ORDER:
+        try:
+            fks = pg_inspector.get_foreign_keys(tname)
+            for fk in fks:
+                fk_name = fk.get('name')
+                if fk_name:
+                    fk_constraints.append({
+                        'table': tname,
+                        'name': fk_name,
+                        'columns': fk['constrained_columns'],
+                        'ref_table': fk['referred_table'],
+                        'ref_columns': fk['referred_columns'],
+                    })
+                    db.session.execute(text(
+                        f'ALTER TABLE {tname} DROP CONSTRAINT IF EXISTS "{fk_name}"'
+                    ))
+        except Exception as e:
+            print(f"  [WARN] Could not inspect FKs for {tname}: {e}")
     db.session.commit()
+    print(f"[INFO] Dropped {len(fk_constraints)} foreign key constraints")
 
     # Clean up any data from previous failed migration attempts
     for tname in reversed(TABLE_ORDER):
@@ -294,7 +313,7 @@ with app.app_context():
             count = db.session.execute(text(f"SELECT COUNT(*) FROM {tname}")).scalar()
             if count > 0:
                 print(f"  [CLEAN] {tname}: removing {count} rows from previous attempt")
-                db.session.execute(text(f"TRUNCATE TABLE {tname} CASCADE"))
+                db.session.execute(text(f"DELETE FROM {tname}"))
         except Exception:
             pass
     db.session.commit()
@@ -418,12 +437,26 @@ with app.app_context():
     print(f"\n[INFO] Total rows copied: {total_rows}")
 
     # ============================================
-    # RE-ENABLE FOREIGN KEY CHECKS
+    # RE-CREATE FOREIGN KEY CONSTRAINTS
     # ============================================
-    print("\n[INFO] Re-enabling foreign key checks...")
-    db.session.execute(text("SET session_replication_role = DEFAULT"))
+    print(f"\n[INFO] Re-creating {len(fk_constraints)} foreign key constraints...")
+    fk_errors = 0
+    for fk in fk_constraints:
+        cols = ', '.join([f'"{c}"' for c in fk['columns']])
+        ref_cols = ', '.join([f'"{c}"' for c in fk['ref_columns']])
+        try:
+            db.session.execute(text(
+                f'ALTER TABLE {fk["table"]} ADD CONSTRAINT "{fk["name"]}" '
+                f'FOREIGN KEY ({cols}) REFERENCES {fk["ref_table"]} ({ref_cols})'
+            ))
+        except Exception as e:
+            fk_errors += 1
+            print(f"  [WARN] Could not re-create FK {fk['name']} on {fk['table']}: {e}")
     db.session.commit()
-    print("[INFO] Foreign key checks re-enabled")
+    if fk_errors == 0:
+        print("[INFO] All foreign key constraints restored")
+    else:
+        print(f"[WARN] {fk_errors} FK constraints could not be restored")
 
     # ============================================
     # RESET POSTGRESQL SEQUENCES
