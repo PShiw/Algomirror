@@ -2385,11 +2385,11 @@ class StrategyExecutor:
                     exit_avg_price = order_data.get('average_price')
                     execution.broker_order_status = order_data.get('order_status')  # OpenAlgo API returns 'order_status' not 'status'
 
-                    # If exit price is missing/zero, wait 3 seconds and re-fetch
+                    # If exit price is missing/zero, wait 1 second and re-fetch
                     if not exit_avg_price or exit_avg_price == 0:
-                        logger.warning(f"[EXIT] Exit price missing for {execution.symbol}, waiting 3s to re-fetch...")
+                        logger.warning(f"[EXIT] Exit price missing for {execution.symbol}, waiting 1s to re-fetch...")
                         import time as time_sleep
-                        time_sleep.sleep(3)
+                        time_sleep.sleep(1)
 
                         retry_response = client.orderstatus(
                             order_id=exit_order_id,
@@ -2717,8 +2717,8 @@ class StrategyExecutor:
                     # Get the exit order ID
                     exit_order_id = response.get('orderid')
 
-                    # Re-fetch execution with lock to update
-                    execution = StrategyExecution.query.with_for_update(nowait=False).get(exec_id)
+                    # Re-fetch execution to update
+                    execution = StrategyExecution.query.get(exec_id)
 
                     # Update with actual exit order ID
                     execution.exit_order_id = exit_order_id
@@ -2777,7 +2777,7 @@ class StrategyExecutor:
 
         # RELIABILITY FIX: Revert status to 'entered' so retry can pick it up
         try:
-            execution = StrategyExecution.query.with_for_update(nowait=False).get(exec_id)
+            execution = StrategyExecution.query.get(exec_id)
             if execution and execution.status == 'exit_pending' and not execution.exit_order_id:
                 execution.status = 'entered'
                 execution.exit_reason = f"failed: after {max_retries} attempts"

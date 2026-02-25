@@ -50,6 +50,7 @@ class Config:
             'max_overflow': 10,
             'pool_timeout': 10,
         }
+
     
     # Session configuration
     SESSION_TYPE = os.environ.get('SESSION_TYPE') or 'filesystem'

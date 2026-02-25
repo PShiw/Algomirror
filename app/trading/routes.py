@@ -1658,10 +1658,12 @@ def risk_status_stream():
                     )
                     db.session.add(order)
 
-                    # Update execution with order ID
+                    # Update execution with order ID and mark as exited immediately
                     execution = StrategyExecution.query.get(execution_id)
                     if execution:
                         execution.exit_order_id = order_id
+                        execution.status = 'exited'
+                        execution.broker_order_status = 'complete'
 
                     db.session.commit()
                     print(f"[EXIT ORDER] SUCCESS: exec_id={execution_id}, order_id={order_id}, symbol={symbol}, account={account_name}, reason={exit_reason}", flush=True)
@@ -1858,6 +1860,8 @@ def risk_status_stream():
                             execution = StrategyExecution.query.get(exec_id)
                             if execution:
                                 execution.exit_order_id = order_id
+                                execution.status = 'exited'
+                                execution.broker_order_status = 'complete'
                             db.session.commit()
                             success_count += 1
 

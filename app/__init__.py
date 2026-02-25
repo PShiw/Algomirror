@@ -19,7 +19,10 @@ from flask_session import Session
 from pythonjsonlogger import jsonlogger
 from config import config
 
-db = SQLAlchemy()
+# expire_on_commit=False prevents SQLAlchemy from expiring all attributes after commit
+# Without this, every attribute access after commit triggers a lazy-load query
+# With PostgreSQL, each lazy-load is a TCP round-trip (~1-5ms)
+db = SQLAlchemy(session_options={'expire_on_commit': False})
 login_manager = LoginManager()
 migrate = Migrate()
 csrf = CSRFProtect()

@@ -878,7 +878,7 @@ def convert_leg_to_market(strategy_id, leg_id):
                     # CRITICAL: Fetch actual execution price from broker
                     # Market orders may execute at different price than original limit
                     import time
-                    time.sleep(0.5)  # Brief delay for order to settle
+                    time.sleep(0.2)  # Brief delay for order to settle
 
                     # Try up to 3 times to get the actual average_price
                     actual_price = None

@@ -318,7 +318,7 @@ def close_account_positions(account_id):
     """Close all open positions for a specific account - PARALLEL EXECUTION
 
     Uses the same robust logic as strategy close-all:
-    - Parallel execution with staggered delays
+    - Parallel execution across accounts
     - Freeze quantity handling
     - Retry logic for failed API calls
     - Proper P&L calculation from exit prices
@@ -371,11 +371,6 @@ def close_account_positions(account_id):
     def close_position_worker(execution, thread_index):
         """Worker function to close a single position in parallel"""
         import time as time_module
-
-        # Add staggered delay based on thread index to prevent race conditions
-        delay = thread_index * 0.3
-        if delay > 0:
-            time_module.sleep(delay)
 
         with app.app_context():
             try:
