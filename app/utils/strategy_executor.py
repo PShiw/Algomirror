@@ -520,9 +520,7 @@ class StrategyExecutor:
 
             logger.debug(f"[BATCH {batch_num}] Completed. Total results so far: {len(results)}")
 
-            # Small delay between batches to let DB settle
-            if batch_end < total_accounts:
-                sleep(0.2)
+            # No delay between batches - PostgreSQL handles concurrent writes fine
 
         logger.debug(f"All {batch_num} batches completed for leg {leg.leg_number}. Total results: {len(results)}")
 
@@ -602,7 +600,6 @@ class StrategyExecutor:
                     )
                     thread.start()
                     retry_threads.append(thread)
-                    sleep(0.5)  # Stagger retries
 
                 # Wait for retry threads
                 for thread in retry_threads:
@@ -727,15 +724,8 @@ class StrategyExecutor:
     def _execute_on_account(self, account: TradingAccount, leg: StrategyLeg,
                            symbol: str, exchange: str, quantity: int, results: List, thread_index: int):
         """Execute order on a specific account"""
-        # Add staggered delay based on thread index to prevent OpenAlgo race condition
-        # Each thread waits: index * 300ms (0ms, 300ms, 600ms, 900ms, ...)
-        # This GUARANTEES threads never hit OpenAlgo at the same time
         import time as time_module
         thread_start = time_module.time()
-        delay = thread_index * 0.3
-        if delay > 0:
-            sleep(delay)
-            print(f"[THREAD {thread_index}] Leg {leg.leg_number}, account={account.account_name}: waited {delay:.2f}s stagger delay", flush=True)
 
         account_name = account.account_name
         print(f"[THREAD {thread_index}] Leg {leg.leg_number}, account={account_name}: STARTED - {symbol} {leg.action} qty={quantity}", flush=True)
