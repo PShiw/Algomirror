@@ -185,8 +185,10 @@ AlgoMirror is a secure and scalable multi-account management platform built on t
 | Python | 3.12+ | Core runtime |
 | Node.js | 16+ | CSS build system (Tailwind) |
 | OpenAlgo | Latest | Trading platform integration |
-| SQLite | Built-in | Development database |
+| PostgreSQL | 14+ (17 recommended) | Production database |
 | TA-Lib | Latest | Technical analysis library |
+
+> **Note:** SQLite is supported for local development/testing. PostgreSQL is **required** for production deployments and is the default for all new installations.
 
 
 ---
@@ -722,7 +724,7 @@ Compatible with Python 3.13+ and TA-Lib
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | SECRET_KEY | Yes | dev-key | Flask session encryption |
-| DATABASE_URL | No | sqlite:///algomirror.db | Database connection |
+| DATABASE_URL | Yes | sqlite:///algomirror.db | PostgreSQL or SQLite connection |
 | FLASK_ENV | No | development | Environment mode |
 | LOG_LEVEL | No | INFO | Logging verbosity |
 | REDIS_URL | No | memory:// | Redis for caching |
@@ -730,6 +732,15 @@ Compatible with Python 3.13+ and TA-Lib
 | SESSION_TYPE | No | filesystem | Session storage type |
 | POSITION_MONITOR_ENABLED | No | True | Enable position monitoring |
 | PING_MONITORING_ENABLED | No | True | Enable health checks |
+
+**Database URL examples:**
+```bash
+# PostgreSQL (production - recommended)
+DATABASE_URL=postgresql://algomirror:password@localhost:5432/algomirror
+
+# SQLite (local development only)
+DATABASE_URL=sqlite:///instance/algomirror.db
+```
 
 ### Rate Limiting
 
@@ -755,17 +766,44 @@ Compatible with Python 3.13+ and TA-Lib
 
 ### Requirements
 
-- PostgreSQL database
+- PostgreSQL 14+ (17 recommended) database
 - Redis for caching (optional)
 - Nginx/Apache reverse proxy
 - SSL certificate (Let's Encrypt)
 - Gunicorn with gthread worker
 
+### PostgreSQL Setup
+
+AlgoMirror uses PostgreSQL as its production database with performance tuning optimized for low-latency order execution.
+
+```bash
+# Install PostgreSQL and create the algomirror database
+sudo bash install/install-postgres.sh
+
+# Apply performance tuning (synchronous_commit=off, SSD optimization, memory tuning)
+sudo bash install/tune-postgres.sh
+
+# Update .env with the DATABASE_URL printed by install-postgres.sh
+# DATABASE_URL=postgresql://algomirror:generated-password@localhost:5432/algomirror
+```
+
+The install script handles:
+- PostgreSQL 17 installation from official APT repository
+- Database user and database creation with secure random password
+- pg_hba.conf authentication configuration
+- Connectivity verification
+
+The tuning script applies:
+- `synchronous_commit = off` (saves ~5-10ms per commit, WAL-protected)
+- Memory-based `shared_buffers` and `effective_cache_size`
+- SSD-optimized `random_page_cost = 1.1`
+- WAL buffer tuning for write performance
+
 ### Production Configuration
 
 ```env
 SECRET_KEY=randomly-generated-256-bit-key
-DATABASE_URL=postgresql://user:password@127.0.0.1/algomirror_prod
+DATABASE_URL=postgresql://algomirror:password@localhost:5432/algomirror
 REDIS_URL=redis://127.0.0.1:6379/0
 FLASK_ENV=production
 SESSION_TYPE=sqlalchemy
@@ -821,12 +859,18 @@ curl -X POST http://127.0.0.1:5000/api/v1/ping -d '{"apikey":"test"}'
 
 **Database Issues:**
 ```bash
-# Using UV (recommended)
-uv run init_db.py reset  # Warning: Deletes all data
-uv run init_db.py
+# Check PostgreSQL is running
+sudo systemctl status postgresql
 
-# Or with activated venv
-python init_db.py reset
+# Check database connectivity
+psql -U algomirror -d algomirror -h 127.0.0.1 -c "SELECT 1;"
+
+# Reset database (Warning: Deletes all data)
+uv run init_db.py reset  # Using UV
+python init_db.py reset   # Or with activated venv
+
+# Re-initialize database
+uv run init_db.py
 python init_db.py
 ```
 
@@ -869,6 +913,8 @@ npm run build-css
 
 ## Database Management
 
+AlgoMirror uses PostgreSQL for production and SQLite for local development. The database backend is auto-detected from the `DATABASE_URL` environment variable.
+
 ```bash
 # Initialize fresh database
 uv run init_db.py        # Using UV
@@ -881,6 +927,22 @@ python init_db.py reset
 # Create test data (development only)
 uv run init_db.py testdata
 python init_db.py testdata
+```
+
+### PostgreSQL-Specific Commands
+
+```bash
+# Connect to the database directly
+psql -U algomirror -d algomirror -h 127.0.0.1
+
+# Check database size
+psql -U algomirror -d algomirror -c "SELECT pg_size_pretty(pg_database_size('algomirror'));"
+
+# Backup database
+pg_dump -U algomirror -h 127.0.0.1 algomirror > backup_$(date +%Y%m%d).sql
+
+# Restore database
+psql -U algomirror -h 127.0.0.1 algomirror < backup_20260225.sql
 ```
 
 ### Running Migrations
@@ -922,7 +984,32 @@ flask db upgrade
 
 ## Version History
 
-### v1.0.0 (Current)
+### v1.1.0 (Current)
+
+**PostgreSQL Migration:**
+- PostgreSQL is now the default production database (SQLite retained for local dev)
+- Automated PostgreSQL installation script (`install/install-postgres.sh`)
+- Server-side performance tuning script (`install/tune-postgres.sh`)
+- Database indexes on all frequently queried columns
+- Connection pooling optimized for single-user app (pool_size=5, max_overflow=10)
+- `expire_on_commit=False` to eliminate lazy-load round-trips after commits
+- psycopg v3 driver for faster PostgreSQL connections
+
+**Performance Optimizations:**
+- Parallel order execution across accounts (removed all SQLite-era stagger delays)
+- Parallel margin pre-fetch using ThreadPoolExecutor
+- Parallelized broker API fetching on trading pages (funds, orderbook, positions, etc.)
+- SQL aggregation on dashboard (eliminates loading thousands of execution objects)
+- Batched DB commits in order status poller (10 commits -> 1 per account)
+- Cached context processor for registration check
+- Funds caching with 30-second TTL
+
+**Reliability Fixes:**
+- Immediate exit status updates (`status='exited'`) on all close paths
+- Removed reliance on background poller for status reflection
+- Consistent claim-before-order pattern across all exit routes
+
+### v1.0.0
 
 **Core Features:**
 - Strategy builder with multi-leg support
@@ -1019,8 +1106,8 @@ flask db upgrade
 ### Database Support
 | Database | Environment |
 |----------|-------------|
-| SQLite | Development |
-| PostgreSQL | Production |
+| PostgreSQL | Production (default, recommended) |
+| SQLite | Local development/testing only |
 | Redis | Caching & Sessions (optional) |
 
 ---

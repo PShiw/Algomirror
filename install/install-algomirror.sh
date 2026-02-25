@@ -268,75 +268,18 @@ check_status "Failed to create virtual environment with uv"
 # Install Python dependencies using uv (faster installation)
 log_message "\nInstalling Python dependencies with uv..." "$BLUE"
 
-# Create a clean requirements file using tee (works better with heredoc)
-tee /tmp/algomirror_requirements.txt > /dev/null << 'EOF'
-alembic==1.16.4
-anyio==4.10.0
-APScheduler==3.11.0
-blinker==1.9.0
-build==1.3.0
-cachelib==0.13.0
-cachetools==6.2.0
-certifi==2025.8.3
-cffi==1.17.1
-click==8.2.1
-colorama==0.4.6
-cryptography==45.0.6
-Cython==3.1.4
-Deprecated==1.2.18
-dnspython==2.7.0
-email_validator==2.2.0
-Flask==3.1.2
-flask-cors==6.0.1
-Flask-Limiter==3.12
-Flask-Login==0.6.3
-Flask-Migrate==4.1.0
-Flask-Session==0.8.0
-Flask-SQLAlchemy==3.1.1
-flask-talisman==1.1.0
-Flask-WTF==1.2.2
-greenlet==3.2.4
-h11==0.16.0
-httpcore==1.0.9
-httpx==0.28.1
-idna==3.10
-itsdangerous==2.2.0
-Jinja2==3.1.6
-limits==5.5.0
-llvmlite==0.44.0
-Mako==1.3.10
-markdown-it-py==4.0.0
-MarkupSafe==3.0.2
-mdurl==0.1.2
-msgspec==0.19.0
-numba==0.61.2
-numpy==2.2.6
-openalgo==1.0.30
-ordered-set==4.1.0
-packaging==25.0
-pandas==2.3.2
-pycparser==2.22
-Pygments==2.19.2
-pyproject-hooks==1.2.0
-python-dateutil==2.9.0.post0
-python-dotenv==1.1.1
-python-json-logger==3.3.0
-pytz==2025.2
-redis==6.4.0
-rich==13.9.4
-six==1.17.0
-sniffio==1.3.1
-SQLAlchemy==2.0.43
-ta-lib==0.6.7
-typing_extensions==4.15.0
-tzdata==2025.2
-tzlocal==5.3.1
-websocket-client==1.8.0
-Werkzeug==3.1.3
-wrapt==1.17.3
-WTForms==3.2.1
-gunicorn==23.0.0
-EOF
+# Use the project's requirements.txt instead of embedded list
+# This ensures dependencies stay in sync with the repository
+if [ -f "$ALGOMIRROR_PATH/requirements.txt" ]; then
+    cp "$ALGOMIRROR_PATH/requirements.txt" /tmp/algomirror_requirements.txt
+    # Ensure gunicorn is included
+    if ! grep -q "gunicorn" /tmp/algomirror_requirements.txt; then
+        echo "gunicorn==23.0.0" >> /tmp/algomirror_requirements.txt
+    fi
+else
+    log_message "Error: requirements.txt not found in $ALGOMIRROR_PATH" "$RED"
+    exit 1
+fi
 
 # Verify requirements file was created
 if [ ! -s /tmp/algomirror_requirements.txt ]; then
@@ -366,6 +309,47 @@ if [ -f "$ALGOMIRROR_PATH/package.json" ]; then
     sudo npm run build-css
 fi
 
+# ============================================
+# INSTALL AND CONFIGURE POSTGRESQL
+# ============================================
+log_message "\n=== PostgreSQL Database Setup ===" "$YELLOW"
+
+INSTALL_DIR="$ALGOMIRROR_PATH/install"
+if [ ! -d "$INSTALL_DIR" ]; then
+    INSTALL_DIR="$SCRIPT_DIR"
+fi
+
+# Install PostgreSQL
+if [ -f "$INSTALL_DIR/install-postgres.sh" ]; then
+    log_message "Installing PostgreSQL..." "$BLUE"
+    sudo bash "$INSTALL_DIR/install-postgres.sh"
+    check_status "Failed to install PostgreSQL"
+
+    # Read the generated DATABASE_URL
+    if [ -f /tmp/algomirror_pg_url.tmp ]; then
+        PG_DATABASE_URL=$(cat /tmp/algomirror_pg_url.tmp)
+        log_message "PostgreSQL DATABASE_URL configured" "$GREEN"
+    else
+        log_message "Warning: PostgreSQL URL file not found, using default" "$YELLOW"
+        PG_DATABASE_URL="postgresql://algomirror:algomirror@localhost:5432/algomirror"
+    fi
+else
+    log_message "Warning: install-postgres.sh not found at $INSTALL_DIR" "$YELLOW"
+    log_message "Skipping PostgreSQL installation - using SQLite as fallback" "$YELLOW"
+    PG_DATABASE_URL="sqlite:///$BASE_PATH/instance/algomirror.db"
+fi
+
+# Tune PostgreSQL
+if [ -f "$INSTALL_DIR/tune-postgres.sh" ] && [[ "$PG_DATABASE_URL" == postgresql* ]]; then
+    log_message "Applying PostgreSQL performance tuning..." "$BLUE"
+    sudo bash "$INSTALL_DIR/tune-postgres.sh"
+    if [ $? -ne 0 ]; then
+        log_message "Warning: PostgreSQL tuning failed (non-critical)" "$YELLOW"
+    else
+        log_message "PostgreSQL performance tuning applied" "$GREEN"
+    fi
+fi
+
 # Generate security keys
 log_message "\nGenerating security keys..." "$BLUE"
 SECRET_KEY=$(generate_hex)
@@ -385,8 +369,8 @@ FLASK_APP=app.py
 FLASK_ENV=production
 SECRET_KEY='$SECRET_KEY'
 
-# Database Configuration
-DATABASE_URL=sqlite:///$BASE_PATH/instance/algomirror.db
+# Database Configuration (PostgreSQL)
+DATABASE_URL=$PG_DATABASE_URL
 
 # Redis Configuration (optional - uses memory if not provided)
 # For production, uncomment and configure Redis
@@ -441,11 +425,13 @@ if [ -f "$ALGOMIRROR_PATH/init_db.py" ]; then
     sudo bash -c "$ACTIVATE_CMD && python init_db.py"
     check_status "Failed to initialize database"
 
-    # Verify database was created
-    if [ -f "$BASE_PATH/instance/algomirror.db" ]; then
-        log_message "Database initialized successfully at $BASE_PATH/instance/algomirror.db" "$GREEN"
+    # Verify database connectivity
+    if [[ "$PG_DATABASE_URL" == postgresql* ]]; then
+        log_message "Database initialized successfully (PostgreSQL)" "$GREEN"
+    elif [ -f "$BASE_PATH/instance/algomirror.db" ]; then
+        log_message "Database initialized successfully (SQLite)" "$GREEN"
     else
-        log_message "Warning: Database file not found after initialization" "$YELLOW"
+        log_message "Warning: Could not verify database initialization" "$YELLOW"
     fi
 else
     log_message "Error: init_db.py not found, cannot initialize database" "$RED"
@@ -601,7 +587,8 @@ log_message "\nCreating systemd service..." "$BLUE"
 sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOL
 [Unit]
 Description=AlgoMirror Multi-Account Management Platform
-After=network.target
+After=network.target postgresql.service
+Wants=postgresql.service
 
 [Service]
 User=www-data
@@ -652,7 +639,11 @@ log_message "╚═════════════════════�
 log_message "\n=== Installation Summary ===" "$YELLOW"
 log_message "Domain: https://$DOMAIN" "$BLUE"
 log_message "Installation Directory: $ALGOMIRROR_PATH" "$BLUE"
-log_message "Database: $BASE_PATH/instance/algomirror.db" "$BLUE"
+if [[ "$PG_DATABASE_URL" == postgresql* ]]; then
+    log_message "Database: PostgreSQL (algomirror)" "$BLUE"
+else
+    log_message "Database: SQLite ($BASE_PATH/instance/algomirror.db)" "$BLUE"
+fi
 log_message "Environment File: $ENV_FILE" "$BLUE"
 log_message "Socket File: $SOCKET_FILE" "$BLUE"
 log_message "Main Service: $SERVICE_NAME" "$BLUE"

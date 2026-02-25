@@ -1,4 +1,24 @@
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:17-alpine
+    container_name: algomirror_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-algomirror}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-algomirror}
+      - POSTGRES_DB=${POSTGRES_DB:-algomirror}
+    volumes:
+      - algomirror_pgdata:/var/lib/postgresql/data
+    networks:
+      - algomirror_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-algomirror}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # AlgoMirror Application
   algomirror:
     build:
@@ -6,13 +26,16 @@ services:
       dockerfile: Dockerfile
     container_name: algomirror
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       - FLASK_APP=app:create_app
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///instance/algomirror.db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-algomirror}:${POSTGRES_PASSWORD:-algomirror}@postgres:5432/${POSTGRES_DB:-algomirror}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SESSION_TYPE=${SESSION_TYPE:-filesystem}
@@ -30,8 +53,6 @@ services:
       - RATE_LIMIT_HEAVY=${RATE_LIMIT_HEAVY:-100}
       - TZ=Asia/Kolkata
     volumes:
-      # Persist database
-      - algomirror_db:/app/instance
       # Persist logs
       - algomirror_logs:/app/logs
       # Persist sessions
@@ -61,7 +82,7 @@ services:
       - with-redis
 
 volumes:
-  algomirror_db:
+  algomirror_pgdata:
     driver: local
   algomirror_logs:
     driver: local
