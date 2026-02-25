@@ -34,10 +34,11 @@ VENV_PYTHON="$BASE_PATH/venv/bin/python"
 FLASK_CMD="$BASE_PATH/venv/bin/flask"
 
 # Detect pip: UV-managed venvs don't have pip, use 'uv pip' instead
+export VIRTUAL_ENV="$BASE_PATH/venv"
 if [ -f "$BASE_PATH/venv/bin/pip" ]; then
     VENV_PIP="$BASE_PATH/venv/bin/pip"
 elif command -v uv &>/dev/null; then
-    VENV_PIP="uv pip --python $VENV_PYTHON"
+    VENV_PIP="uv pip"
 else
     VENV_PIP="$VENV_PYTHON -m pip"
 fi
