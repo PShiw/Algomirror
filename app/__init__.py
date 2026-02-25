@@ -37,7 +37,7 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, sqlite3.Connection):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=5000")  # 5s timeout instead of 30s
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30s timeout for background service contention
         cursor.close()
 
 def setup_logging(app):

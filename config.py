@@ -31,7 +31,7 @@ class Config:
     # WAL mode is set via engine event listener in app/__init__.py
     SQLALCHEMY_ENGINE_OPTIONS = {
         'connect_args': {
-            'timeout': 5  # 5 seconds lock wait (WAL mode makes this rarely needed)
+            'timeout': 30  # 30 seconds lock wait for concurrent background services
         },
         'pool_pre_ping': True,  # Verify connections before using
         'pool_recycle': 3600,   # Recycle connections every hour

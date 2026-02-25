@@ -629,18 +629,98 @@ class StrategyExecutor:
         for failed in failed_orders:
             logger.error(f"[FINAL FAILURE] Order failed on {failed.get('account', 'unknown')}: {failed.get('error', 'unknown error')}")
 
-        # Note: is_executed=True is now set in the MAIN session after all threads complete
-        # This thread-level attempt is kept as a backup but may fail due to session conflicts
+        # BATCH COMMIT: Create all execution records in ONE thread, ONE commit
+        # This eliminates SQLite write lock contention between parallel threads.
+        # Threads only return data (dicts) - all DB writes happen here sequentially.
+        execution_map = {}  # account_name -> StrategyExecution object (for poller)
+        records_to_commit = []
+
+        for result in results:
+            # Only process results that have DB data (skip skipped/error without account_id)
+            if 'account_id' not in result:
+                continue
+
+            if result.get('status') in ['pending', 'success']:
+                execution = StrategyExecution(
+                    strategy_id=self.strategy.id,
+                    account_id=result['account_id'],
+                    leg_id=result['leg_id'],
+                    order_id=result.get('order_id'),
+                    symbol=result['symbol'],
+                    exchange=result['exchange'],
+                    quantity=result['quantity'],
+                    product=result.get('product', 'MIS'),
+                    status='pending',
+                    broker_order_status='open',
+                    entry_time=result.get('entry_time', datetime.utcnow()),
+                    entry_price=None
+                )
+                db.session.add(execution)
+                records_to_commit.append(execution)
+                execution_map[result['account']] = (execution, result)
+
+            elif result.get('status') in ['failed', 'error'] and result.get('account_id'):
+                failed_execution = StrategyExecution(
+                    strategy_id=self.strategy.id,
+                    account_id=result['account_id'],
+                    leg_id=result.get('leg_id', leg.id),
+                    order_id=None,
+                    symbol=result.get('symbol', ''),
+                    exchange=result.get('exchange', ''),
+                    quantity=result.get('quantity', 0),
+                    product=result.get('product', 'MIS'),
+                    status='failed',
+                    broker_order_status='rejected',
+                    entry_time=result.get('entry_time', datetime.utcnow()),
+                    entry_price=None,
+                    error_message=result.get('error_message', result.get('error', ''))[:500]
+                )
+                db.session.add(failed_execution)
+                records_to_commit.append(failed_execution)
+
+        # Mark leg as executed if we have any successful orders
         if successful_orders:
-            try:
-                with self.lock:
-                    leg.is_executed = True
+            leg.is_executed = True
+
+        # Single commit for ALL execution records + leg status
+        if records_to_commit or successful_orders:
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
                     db.session.commit()
-                logger.debug(f"Leg {leg.leg_number} marked as executed (thread session - backup)")
-            except Exception as e:
-                # The main session commit after threads complete will handle it
-                logger.debug(f"Thread session commit for leg {leg.leg_number} failed (expected): {e}")
-                db.session.rollback()
+                    print(f"[BATCH COMMIT] Leg {leg.leg_number}: committed {len(records_to_commit)} execution records", flush=True)
+                    logger.debug(f"[BATCH COMMIT] Leg {leg.leg_number}: {len(records_to_commit)} records committed")
+                    break
+                except Exception as commit_error:
+                    db.session.rollback()
+                    if attempt < max_retries - 1:
+                        wait_time = 1.0 * (attempt + 1)
+                        print(f"[BATCH RETRY] Leg {leg.leg_number}: commit error, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s - {commit_error}", flush=True)
+                        sleep(wait_time)
+                        # Re-add all records after rollback
+                        for record in records_to_commit:
+                            db.session.add(record)
+                        if successful_orders:
+                            leg.is_executed = True
+                    else:
+                        logger.error(f"[BATCH FAILED] Leg {leg.leg_number}: commit failed after {max_retries} retries: {commit_error}")
+                        print(f"[BATCH FAILED] Leg {leg.leg_number}: commit failed after {max_retries} retries: {commit_error}", flush=True)
+
+        # Start background poller for each committed execution
+        for account_name, (execution, result) in execution_map.items():
+            if execution.id is not None:
+                account_obj = result.get('_account_obj')
+                order_id = result.get('order_id')
+                if account_obj and order_id:
+                    order_status_poller.add_order(
+                        execution_id=execution.id,
+                        account=account_obj,
+                        order_id=order_id,
+                        strategy_name=self.strategy.name
+                    )
+                    print(f"[POLLER] Started polling for {account_name}: execution_id={execution.id}, order_id={order_id}", flush=True)
+            else:
+                logger.error(f"[DB ERROR] Execution ID is None for {account_name} after batch commit")
 
         return results
 
@@ -742,124 +822,49 @@ class StrategyExecutor:
 
                 if response.get('status') == 'success':
                     order_id = response.get('orderid')
-
-                    # PHASE 2: Save as 'pending' immediately, no blocking wait!
-                    # Background poller will update status asynchronously
                     logger.debug(f"[ORDER PLACED] Order ID: {order_id} for {symbol} on {account_name} (will poll status)")
 
-                    # IMPORTANT: Do NOT pre-set entry_price to limit_price
-                    # The actual execution price may differ (e.g., LIMIT converts to MARKET)
-                    # Always let the poller fetch the real average_price from broker
-                    initial_entry_price = None
-
-                    # Create execution record (already in app context from _execute_leg_parallel)
-                    execution = StrategyExecution(
-                        strategy_id=self.strategy.id,
-                        account_id=account_id,
-                        leg_id=leg.id,
-                        order_id=order_id,
-                        symbol=symbol,
-                        exchange=exchange,
-                        quantity=quantity,
-                        product=self.strategy.product_order_type or 'MIS',  # MIS, NRML, CNC
-                        status='pending',  # Will be updated by background poller
-                        broker_order_status='open',  # Assume open until poller updates
-                        entry_time=datetime.utcnow(),
-                        entry_price=initial_entry_price  # Set to limit price for LIMIT orders, None for MARKET
-                    )
-
-                    # Serialize DB commits across threads using self.lock
-                    # API calls run in parallel (different OpenAlgo servers), but SQLite
-                    # only allows ONE writer at a time. Without this lock, threads that
-                    # finish their API calls simultaneously all hit db.session.commit()
-                    # at once, causing "database is locked" errors.
-                    # Lock is held ONLY during add+commit (milliseconds), not during API calls.
-                    committed = False
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            with self.lock:
-                                db.session.add(execution)
-                                db.session.commit()
-                            committed = True
-                            print(f"[DB COMMIT] Leg {leg.leg_number}, account={account_name}: execution saved (id={execution.id})", flush=True)
-                            break
-                        except Exception as commit_error:
-                            db.session.rollback()
-                            if attempt < max_retries - 1:
-                                import time as time_sleep
-                                wait_time = 0.5 * (attempt + 1)
-                                print(f"[DB RETRY] Leg {leg.leg_number}, account={account_name}: commit error, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s - {commit_error}", flush=True)
-                                time_sleep.sleep(wait_time)
-                            else:
-                                logger.error(f"Failed to commit after {max_retries} attempts: {commit_error}")
-                                print(f"[DB FAILED] Leg {leg.leg_number}, account={account_name}: commit failed after {max_retries} retries: {commit_error}", flush=True)
-
-                    # PHASE 2: Add order to background poller for status tracking
-                    if committed and execution.id is not None:
-                        order_status_poller.add_order(
-                            execution_id=execution.id,
-                            account=account,
-                            order_id=order_id,
-                            strategy_name=self.strategy.name
-                        )
-                    elif not committed:
-                        logger.error(f"[DB ERROR] Commit failed for {account_name} order {order_id}")
-                    else:
-                        logger.error(f"[DB ERROR] Execution ID is None after commit for {account_name} order {order_id} - record may not have been saved!")
-
-                    # Report as pending - background poller will update status
+                    # NO DB WRITES HERE - threads only return data
+                    # DB commits happen in _execute_leg after ALL threads complete
+                    # This avoids SQLite write lock contention between parallel threads
                     results.append({
                         'account': account_name,
+                        'account_id': account_id,
                         'symbol': symbol,
+                        'exchange': exchange,
+                        'quantity': quantity,
                         'order_id': order_id,
                         'status': 'pending',
                         'message': 'Order placed, checking status in background',
                         'order_status': 'open',
-                        'leg': leg.leg_number
+                        'leg': leg.leg_number,
+                        'leg_id': leg.id,
+                        'product': self.strategy.product_order_type or 'MIS',
+                        'entry_time': datetime.utcnow(),
+                        '_account_obj': account,  # For poller registration
                     })
 
-                    print(f"[THREAD SUCCESS] Leg {leg.leg_number}, account={account_name}: order_id={order_id}, execution_id={execution.id}", flush=True)
+                    print(f"[THREAD SUCCESS] Leg {leg.leg_number}, account={account_name}: order_id={order_id}", flush=True)
 
                 else:
-                    # Order failed - create execution record for visibility and tracking
+                    # Order failed
                     error_msg = response.get('message', 'Order placement failed')
                     logger.error(f"[THREAD FAILED] Leg {leg.leg_number} failed on {account_name}: {error_msg}")
 
-                    # Create execution record for failed order (for tracking and visibility)
-                    try:
-                        failed_execution = StrategyExecution(
-                            strategy_id=self.strategy.id,
-                            account_id=account_id,
-                            leg_id=leg.id,
-                            order_id=None,  # No order ID since it failed
-                            symbol=symbol,
-                            exchange=exchange,
-                            quantity=quantity,
-                            status='failed',
-                            broker_order_status='rejected',  # Mark as rejected since order didn't go through
-                            entry_time=datetime.utcnow(),
-                            entry_price=None,
-                            error_message=error_msg[:500]  # Store error (truncate if too long)
-                        )
-
-                        try:
-                            with self.lock:
-                                db.session.add(failed_execution)
-                                db.session.commit()
-                        except Exception as commit_error:
-                            logger.warning(f"Could not commit failed execution record: {commit_error}")
-                            db.session.rollback()
-
-                    except Exception as tracking_error:
-                        logger.warning(f"Could not create tracking record for failed order: {tracking_error}")
-
+                    # NO DB WRITES HERE - batch commit in _execute_leg
                     results.append({
                         'account': account_name,
+                        'account_id': account_id,
                         'symbol': symbol,
+                        'exchange': exchange,
+                        'quantity': quantity,
                         'status': 'failed',
                         'error': error_msg,
-                        'leg': leg.leg_number
+                        'error_message': error_msg[:500],
+                        'leg': leg.leg_number,
+                        'leg_id': leg.id,
+                        'product': self.strategy.product_order_type or 'MIS',
+                        'entry_time': datetime.utcnow(),
                     })
 
             except Exception as e:
