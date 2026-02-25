@@ -1341,12 +1341,11 @@ def strategy_positions(strategy_id):
     # Refresh session after sync
     db.session.expire_all()
 
-    # Get open, closed, AND pending positions
-    # Pending positions are shown so user can see orders immediately after placement
-    # Closed positions will show with quantity=0
+    # Get open and closed positions (exclude pending - unfilled LIMIT orders belong in Orderbook only)
+    # The sync above ensures any just-filled orders are transitioned to 'entered' before this query
     positions = StrategyExecution.query.filter(
         StrategyExecution.strategy_id == strategy_id,
-        StrategyExecution.status.in_(['pending', 'entered', 'exit_pending', 'exited'])
+        StrategyExecution.status.in_(['entered', 'exit_pending', 'exited'])
     ).join(TradingAccount).join(StrategyLeg).all()
 
     logger.debug(f"[POSITIONS] Found {len(positions)} positions for strategy {strategy_id}")
@@ -1405,7 +1404,6 @@ def strategy_positions(strategy_id):
     for position in positions:
         # Skip orders that were failed or have problematic broker status
         # BUT: If position has entry_price, it's filled - include it regardless of status
-        # IMPORTANT: 'pending' orders are now shown so user can see orders immediately
 
         # If has entry_price, it's definitely filled - include it
         has_entry_price = position.entry_price and position.entry_price > 0
@@ -1415,27 +1413,17 @@ def strategy_positions(strategy_id):
             if position.status == 'failed':
                 continue
             # Skip if broker status indicates order was rejected/cancelled
-            # But allow 'open' and 'pending' broker statuses (order placed, waiting for fill)
             if hasattr(position, 'broker_order_status') and position.broker_order_status in ['rejected', 'cancelled']:
                 continue
 
         # Check if this is a closed position
         is_closed = position.status == 'exited'
-        is_pending = position.status == 'pending'
 
         if is_closed:
             # Closed position - show with quantity=0 and realized P&L
             quantity = 0  # Show as 0 for closed positions
             ltp = position.exit_price or position.entry_price or 0
             pnl = position.realized_pnl or 0
-        elif is_pending:
-            # Pending position - order placed but not yet confirmed by broker
-            ltp = ltp_cache.get((position.symbol, position.exchange), 0)
-            quantity = position.quantity
-            if position.leg.action == 'SELL':
-                quantity = -quantity
-            # P&L is 0 for pending orders (no confirmed entry price yet)
-            pnl = 0
         else:
             # Open position - calculate unrealized P&L
             # Get current price from cache (pre-fetched for consistency across accounts)
@@ -2660,7 +2648,7 @@ def get_positions(strategy_id):
 
         executions = StrategyExecution.query.filter(
             StrategyExecution.strategy_id == strategy_id,
-            StrategyExecution.status.in_(['pending', 'entered'])
+            StrategyExecution.status.in_(['entered', 'exit_pending'])
         ).all()
 
         # Filter out rejected/cancelled orders
