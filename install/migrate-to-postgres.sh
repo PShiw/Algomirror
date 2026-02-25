@@ -30,6 +30,10 @@ log_message() {
 BASE_PATH="/var/python/algomirror"
 SQLITE_DB="$BASE_PATH/instance/algomirror.db"
 ENV_FILE="$BASE_PATH/.env"
+# Also check git repo root for .env
+if [ ! -f "$ENV_FILE" ] && [ -f "$BASE_PATH/app/.env" ]; then
+    ENV_FILE="$BASE_PATH/app/.env"
+fi
 VENV_PYTHON="$BASE_PATH/venv/bin/python"
 FLASK_CMD="$BASE_PATH/venv/bin/flask"
 
