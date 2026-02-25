@@ -96,22 +96,27 @@ fi
 log_message "  PostgreSQL URL: ${PG_URL%%@*}@..." "$GREEN"
 
 # ============================================
-# ENSURE psycopg2-binary IS INSTALLED
+# ENSURE PostgreSQL DRIVER IS INSTALLED
 # ============================================
-log_message "\nChecking psycopg2-binary..." "$BLUE"
+log_message "\nChecking PostgreSQL driver..." "$BLUE"
 
 # Install system dependency for PostgreSQL client library
 apt-get install -y -qq libpq-dev >/dev/null 2>&1
 
-$VENV_PIP show psycopg2-binary >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-    log_message "Installing psycopg2-binary..." "$YELLOW"
-    $VENV_PIP install psycopg2-binary
+# Check if any PostgreSQL driver is already installed
+DRIVER_INSTALLED=false
+for pkg in psycopg2-binary psycopg2 psycopg; do
+    $VENV_PIP show "$pkg" >/dev/null 2>&1 && DRIVER_INSTALLED=true && break
+done
+
+if [ "$DRIVER_INSTALLED" = false ]; then
+    log_message "Installing psycopg[binary] (latest PostgreSQL driver)..." "$YELLOW"
+    $VENV_PIP install "psycopg[binary]"
     if [ $? -ne 0 ]; then
-        log_message "Trying psycopg2 (source build) as fallback..." "$YELLOW"
-        $VENV_PIP install psycopg2
+        log_message "Trying psycopg2-binary as fallback..." "$YELLOW"
+        $VENV_PIP install psycopg2-binary
         if [ $? -ne 0 ]; then
-            log_message "Failed to install psycopg2. Check errors above." "$RED"
+            log_message "Failed to install PostgreSQL driver. Check errors above." "$RED"
             exit 1
         fi
     fi

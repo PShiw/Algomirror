@@ -20,6 +20,10 @@ def get_database_uri():
             absolute_path = os.path.join(BASE_DIR, relative_path)
             return f'sqlite:///{absolute_path}'
 
+    # Use psycopg v3 driver for PostgreSQL (faster, async-capable)
+    if db_url.startswith('postgresql://'):
+        db_url = db_url.replace('postgresql://', 'postgresql+psycopg://', 1)
+
     return db_url
 
 class Config:
