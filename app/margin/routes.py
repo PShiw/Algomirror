@@ -16,11 +16,7 @@ logger = logging.getLogger(__name__)
 @margin_bp.route('/')
 @login_required
 def dashboard():
-    """Margin dashboard showing requirements and current usage"""
-    from app.utils.openalgo_client import ExtendedOpenAlgoAPI
-    from datetime import datetime, timedelta
-    import pytz
-
+    """Margin dashboard showing requirements and trade quality settings"""
     # Get user's margin requirements
     margin_requirements = MarginRequirement.query.filter_by(
         user_id=current_user.id
@@ -44,84 +40,9 @@ def dashboard():
             user_id=current_user.id
         ).all()
 
-    # Get ALL active accounts
-    accounts = TradingAccount.query.filter_by(
-        user_id=current_user.id,
-        is_active=True
-    ).all()
-
-    margin_trackers = []
-    ist_tz = pytz.timezone('Asia/Kolkata')
-
-    # Process each account - similar to funds route
-    for account in accounts:
-        try:
-            # Fetch real-time funds data from API
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            response = client.funds()
-
-            funds_data = {}
-            if response.get('status') == 'success':
-                funds_data = response.get('data', {})
-                # Update cached data
-                account.last_funds_data = funds_data
-                account.last_data_update = datetime.utcnow()
-                db.session.commit()
-            elif account.last_funds_data:
-                # Use cached data if API fails
-                funds_data = account.last_funds_data
-
-            # Extract margin-related values from funds data using correct field names
-            total_cash = float(funds_data.get('availablecash', 0))
-            margin_used = float(funds_data.get('utiliseddebits', 0))
-            collateral = float(funds_data.get('collateral', 0))
-
-            # Convert UTC to IST for display
-            last_updated_ist = None
-            if account.last_data_update:
-                utc_time = pytz.utc.localize(account.last_data_update)
-                last_updated_ist = utc_time.astimezone(ist_tz)
-
-            # Add to trackers list
-            margin_trackers.append({
-                'account_id': account.id,
-                'account_name': account.account_name,
-                'broker': account.broker_name,
-                'total_margin': total_cash + collateral,  # Total available including collateral
-                'used_margin': margin_used,
-                'free_margin': (total_cash + collateral) - margin_used,
-                'available_cash': total_cash,
-                'collateral': collateral,
-                'utilized_debits': margin_used,
-                'm2m_realized': float(funds_data.get('m2mrealized', 0)),
-                'm2m_unrealized': float(funds_data.get('m2munrealized', 0)),
-                'last_updated': last_updated_ist
-            })
-
-        except Exception as e:
-            logger.error(f"Error fetching margin for {account.account_name}: {e}")
-            # Still show account with zero values if fetch fails
-            margin_trackers.append({
-                'account_id': account.id,
-                'account_name': account.account_name,
-                'broker': account.broker_name,
-                'total_margin': 0,
-                'used_margin': 0,
-                'free_margin': 0,
-                'span_margin': 0,
-                'exposure_margin': 0,
-                'option_premium': 0,
-                'collateral': 0,
-                'last_updated': None
-            })
-
     return render_template('margin/dashboard.html',
                          margin_requirements=margin_requirements,
-                         trade_qualities=trade_qualities,
-                         margin_trackers=margin_trackers)
+                         trade_qualities=trade_qualities)
 
 @margin_bp.route('/requirements', methods=['GET', 'POST'])
 @login_required

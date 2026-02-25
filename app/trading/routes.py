@@ -13,6 +13,40 @@ from app.utils.time_utils import format_timestamp_to_ist
 import json
 import time
 
+def fetch_broker_data_parallel(accounts, api_method, app):
+    """Fetch data from broker API in parallel for multiple accounts.
+
+    Args:
+        accounts: List of TradingAccount objects
+        api_method: String name of the API method to call (e.g., 'orderbook', 'tradebook')
+        app: Flask app object for app context in threads
+
+    Returns:
+        List of (account, response_data_or_None) tuples in original order
+    """
+    import concurrent.futures
+
+    def fetch_one(account):
+        with app.app_context():
+            try:
+                client = ExtendedOpenAlgoAPI(
+                    api_key=account.get_api_key(),
+                    host=account.host_url
+                )
+                response = getattr(client, api_method)()
+                return (account, response)
+            except Exception as e:
+                current_app.logger.error(f'Error fetching {api_method} for account {account.id}: {str(e)}')
+                return (account, None)
+
+    if len(accounts) <= 1:
+        # Single account - no need for threads
+        return [fetch_one(accounts[0])] if accounts else []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(accounts))) as executor:
+        return list(executor.map(fetch_one, accounts))
+
+
 def get_selected_accounts():
     """Get accounts to display based on user selection"""
     selected_account_id = request.args.get('account')
@@ -40,50 +74,78 @@ def get_selected_accounts():
 def funds():
     accounts = get_selected_accounts()
     funds_data = []
-    
+
+    # Split accounts into cached (fresh) and stale (need broker API call)
+    cached_accounts = []
+    stale_accounts = []
     for account in accounts:
-        try:
-            # Create API client for this account
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            
-            # Fetch real-time funds data
-            response = client.funds()
-            
-            if response.get('status') == 'success':
-                account_funds = response.get('data', {})
-                account_funds['account_name'] = account.account_name
-                account_funds['account_id'] = account.id
-                account_funds['broker'] = account.broker_name
-                
-                # Update cached data
-                account.last_funds_data = account_funds
-                account.last_data_update = datetime.utcnow()
-                from app import db
-                db.session.commit()
-                
-                funds_data.append(account_funds)
-            elif account.last_funds_data:
-                # Use cached data if API fails
-                account_funds = account.last_funds_data.copy()
-                account_funds['account_name'] = account.account_name
-                account_funds['account_id'] = account.id
-                account_funds['broker'] = account.broker_name
-                funds_data.append(account_funds)
-                
-        except Exception as e:
-            current_app.logger.error(f'Error fetching funds for account {account.id}: {str(e)}')
-            # Use cached data if available
-            if account.last_funds_data:
-                account_funds = account.last_funds_data.copy()
-                account_funds['account_name'] = account.account_name
-                account_funds['account_id'] = account.id
-                account_funds['broker'] = account.broker_name
-                funds_data.append(account_funds)
-    
-    return render_template('trading/funds.html', 
+        if account.last_funds_data and account.last_data_update:
+            cache_age = (datetime.utcnow() - account.last_data_update).total_seconds()
+            if cache_age < 30:
+                cached_accounts.append(account)
+                continue
+        stale_accounts.append(account)
+
+    # Return cached data immediately for fresh accounts
+    for account in cached_accounts:
+        account_funds = account.last_funds_data.copy()
+        account_funds['account_name'] = account.account_name
+        account_funds['account_id'] = account.id
+        account_funds['broker'] = account.broker_name
+        funds_data.append(account_funds)
+
+    # Fetch stale accounts from broker API in parallel
+    if stale_accounts:
+        import concurrent.futures
+        app = current_app._get_current_object()
+
+        def fetch_account_funds(account):
+            with app.app_context():
+                try:
+                    client = ExtendedOpenAlgoAPI(
+                        api_key=account.get_api_key(),
+                        host=account.host_url
+                    )
+                    response = client.funds()
+
+                    if response.get('status') == 'success':
+                        account_funds = response.get('data', {})
+                        account_funds['account_name'] = account.account_name
+                        account_funds['account_id'] = account.id
+                        account_funds['broker'] = account.broker_name
+
+                        # Update cache
+                        account.last_funds_data = account_funds
+                        account.last_data_update = datetime.utcnow()
+                        try:
+                            db.session.commit()
+                        except Exception:
+                            db.session.rollback()
+
+                        return account_funds
+                    elif account.last_funds_data:
+                        account_funds = account.last_funds_data.copy()
+                        account_funds['account_name'] = account.account_name
+                        account_funds['account_id'] = account.id
+                        account_funds['broker'] = account.broker_name
+                        return account_funds
+                except Exception as e:
+                    current_app.logger.error(f'Error fetching funds for account {account.id}: {str(e)}')
+                    if account.last_funds_data:
+                        account_funds = account.last_funds_data.copy()
+                        account_funds['account_name'] = account.account_name
+                        account_funds['account_id'] = account.id
+                        account_funds['broker'] = account.broker_name
+                        return account_funds
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(stale_accounts))) as executor:
+            results = list(executor.map(fetch_account_funds, stale_accounts))
+            for result in results:
+                if result:
+                    funds_data.append(result)
+
+    return render_template('trading/funds.html',
                          funds_data=funds_data,
                          single_account=len(accounts) == 1,
                          accounts=current_user.get_active_accounts())
@@ -93,34 +155,24 @@ def funds():
 def orderbook():
     accounts = get_selected_accounts()
     orderbook_data = []
-    
-    for account in accounts:
-        try:
-            # Create API client for this account
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            
-            # Fetch orderbook data
-            response = client.orderbook()
-            
-            if response.get('status') == 'success':
-                data = response.get('data', {})
-                orders = data.get('orders', [])
-                
-                # Add account info to each order
-                for order in orders:
-                    order['account_name'] = account.account_name
-                    order['account_id'] = account.id
-                    order['broker'] = account.broker_name
-                    if order.get('timestamp'):
-                        order['timestamp'] = format_timestamp_to_ist(order.get('timestamp'), include_date=True)
-                
-                orderbook_data.extend(orders)
-                
-        except Exception as e:
-            current_app.logger.error(f'Error fetching orderbook for account {account.id}: {str(e)}')
+
+    # Fetch orderbook from all accounts in parallel
+    app = current_app._get_current_object()
+    results = fetch_broker_data_parallel(accounts, 'orderbook', app)
+
+    for account, response in results:
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            orders = data.get('orders', [])
+
+            for order in orders:
+                order['account_name'] = account.account_name
+                order['account_id'] = account.id
+                order['broker'] = account.broker_name
+                if order.get('timestamp'):
+                    order['timestamp'] = format_timestamp_to_ist(order.get('timestamp'), include_date=True)
+
+            orderbook_data.extend(orders)
     
     # Calculate statistics
     statistics = {
@@ -143,35 +195,25 @@ def orderbook():
 def tradebook():
     accounts = get_selected_accounts()
     tradebook_data = []
-    
-    for account in accounts:
-        try:
-            # Create API client for this account
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            
-            # Fetch tradebook data
-            response = client.tradebook()
-            
-            if response.get('status') == 'success':
-                trades = response.get('data', [])
-                
-                # Add account info to each trade
-                for trade in trades:
-                    trade['account_name'] = account.account_name
-                    trade['account_id'] = account.id
-                    trade['broker'] = account.broker_name
-                    if trade.get('timestamp'):
-                        trade['timestamp'] = format_timestamp_to_ist(trade.get('timestamp'), include_date=True)
-                    if trade.get('filltime'):
-                        trade['filltime'] = format_timestamp_to_ist(trade.get('filltime'), include_date=True)
-                
-                tradebook_data.extend(trades)
-                
-        except Exception as e:
-            current_app.logger.error(f'Error fetching tradebook for account {account.id}: {str(e)}')
+
+    # Fetch tradebook from all accounts in parallel
+    app = current_app._get_current_object()
+    results = fetch_broker_data_parallel(accounts, 'tradebook', app)
+
+    for account, response in results:
+        if response and response.get('status') == 'success':
+            trades = response.get('data', [])
+
+            for trade in trades:
+                trade['account_name'] = account.account_name
+                trade['account_id'] = account.id
+                trade['broker'] = account.broker_name
+                if trade.get('timestamp'):
+                    trade['timestamp'] = format_timestamp_to_ist(trade.get('timestamp'), include_date=True)
+                if trade.get('filltime'):
+                    trade['filltime'] = format_timestamp_to_ist(trade.get('filltime'), include_date=True)
+
+            tradebook_data.extend(trades)
     
     # Calculate total P&L
     total_pnl = 0
@@ -200,76 +242,48 @@ def tradebook():
 def positions():
     accounts = get_selected_accounts()
     positions_data = []
-    
-    for account in accounts:
-        try:
-            # Create API client for this account
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            
-            # Fetch position book data
-            response = client.positionbook()
-            
-            if response.get('status') == 'success':
-                positions = response.get('data', [])
-                
-                # Add account info to each position
-                for position in positions:
-                    position['account_name'] = account.account_name
-                    position['account_id'] = account.id
-                    position['broker'] = account.broker_name
-                    
-                    # Calculate additional metrics
-                    try:
-                        qty = float(position.get('quantity', 0))
-                        avg_price = float(position.get('average_price', 0))
-                        ltp = float(position.get('ltp', 0))
-                        
-                        if qty != 0 and avg_price != 0:
-                            position['invested_value'] = abs(qty * avg_price)
-                            position['current_value'] = abs(qty * ltp)
-                            position['pnl_percentage'] = ((ltp - avg_price) / avg_price * 100) if avg_price else 0
-                    except (ValueError, TypeError):
-                        position['invested_value'] = 0
-                        position['current_value'] = 0
-                        position['pnl_percentage'] = 0
-                
-                positions_data.extend(positions)
-                
-                # Update cached data
-                account.last_positions_data = positions
-                account.last_data_update = datetime.utcnow()
-                from app import db
+
+    # Fetch positions from all accounts in parallel
+    app = current_app._get_current_object()
+    results = fetch_broker_data_parallel(accounts, 'positionbook', app)
+
+    def enrich_positions(positions_list, account):
+        """Add account info and calculate metrics for positions"""
+        for position in positions_list:
+            position['account_name'] = account.account_name
+            position['account_id'] = account.id
+            position['broker'] = account.broker_name
+            try:
+                qty = float(position.get('quantity', 0))
+                avg_price = float(position.get('average_price', 0))
+                ltp = float(position.get('ltp', 0))
+                if qty != 0 and avg_price != 0:
+                    position['invested_value'] = abs(qty * avg_price)
+                    position['current_value'] = abs(qty * ltp)
+                    position['pnl_percentage'] = ((ltp - avg_price) / avg_price * 100) if avg_price else 0
+            except (ValueError, TypeError):
+                position['invested_value'] = 0
+                position['current_value'] = 0
+                position['pnl_percentage'] = 0
+
+    for account, response in results:
+        if response and response.get('status') == 'success':
+            pos_list = response.get('data', [])
+            enrich_positions(pos_list, account)
+            positions_data.extend(pos_list)
+
+            # Update cache
+            account.last_positions_data = pos_list
+            account.last_data_update = datetime.utcnow()
+            try:
                 db.session.commit()
-                
-        except Exception as e:
-            current_app.logger.error(f'Error fetching positions for account {account.id}: {str(e)}')
-            # Use cached data if available
-            if account.last_positions_data:
-                positions = account.last_positions_data
-                for position in positions:
-                    position['account_name'] = account.account_name
-                    position['account_id'] = account.id
-                    position['broker'] = account.broker_name
-                    
-                    # Calculate additional metrics for cached data
-                    try:
-                        qty = float(position.get('quantity', 0))
-                        avg_price = float(position.get('average_price', 0))
-                        ltp = float(position.get('ltp', 0))
-                        
-                        if qty != 0 and avg_price != 0:
-                            position['invested_value'] = abs(qty * avg_price)
-                            position['current_value'] = abs(qty * ltp)
-                            position['pnl_percentage'] = ((ltp - avg_price) / avg_price * 100) if avg_price else 0
-                    except (ValueError, TypeError):
-                        position['invested_value'] = 0
-                        position['current_value'] = 0
-                        position['pnl_percentage'] = 0
-                        
-                positions_data.extend(positions)
+            except Exception:
+                db.session.rollback()
+        elif account.last_positions_data:
+            # Use cached data if API fails
+            pos_list = account.last_positions_data
+            enrich_positions(pos_list, account)
+            positions_data.extend(pos_list)
     
     # Calculate totals
     total_pnl = sum(float(p.get('pnl', 0)) for p in positions_data)
@@ -289,47 +303,38 @@ def positions():
 def holdings():
     accounts = get_selected_accounts()
     holdings_data = []
-    
-    for account in accounts:
-        try:
-            # Create API client for this account
-            client = ExtendedOpenAlgoAPI(
-                api_key=account.get_api_key(),
-                host=account.host_url
-            )
-            
-            # Fetch holdings data
-            response = client.holdings()
-            
-            if response.get('status') == 'success':
-                data = response.get('data', {})
-                holdings = data.get('holdings', [])
-                
-                # Add account info to each holding
-                for holding in holdings:
-                    holding['account_name'] = account.account_name
-                    holding['account_id'] = account.id
-                    holding['broker'] = account.broker_name
-                
-                holdings_data.extend(holdings)
-                
-                # Update cached data
-                account.last_holdings_data = data
-                account.last_data_update = datetime.utcnow()
-                from app import db
+
+    # Fetch holdings from all accounts in parallel
+    app = current_app._get_current_object()
+    results = fetch_broker_data_parallel(accounts, 'holdings', app)
+
+    for account, response in results:
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            holding_list = data.get('holdings', [])
+
+            for holding in holding_list:
+                holding['account_name'] = account.account_name
+                holding['account_id'] = account.id
+                holding['broker'] = account.broker_name
+
+            holdings_data.extend(holding_list)
+
+            # Update cache
+            account.last_holdings_data = data
+            account.last_data_update = datetime.utcnow()
+            try:
                 db.session.commit()
-                
-        except Exception as e:
-            current_app.logger.error(f'Error fetching holdings for account {account.id}: {str(e)}')
-            # Use cached data if available
-            if account.last_holdings_data:
-                data = account.last_holdings_data
-                holdings = data.get('holdings', []) if isinstance(data, dict) else []
-                for holding in holdings:
-                    holding['account_name'] = account.account_name
-                    holding['account_id'] = account.id
-                    holding['broker'] = account.broker_name
-                holdings_data.extend(holdings)
+            except Exception:
+                db.session.rollback()
+        elif account.last_holdings_data:
+            data = account.last_holdings_data
+            holding_list = data.get('holdings', []) if isinstance(data, dict) else []
+            for holding in holding_list:
+                holding['account_name'] = account.account_name
+                holding['account_id'] = account.id
+                holding['broker'] = account.broker_name
+            holdings_data.extend(holding_list)
     
     # Calculate statistics
     statistics = {
