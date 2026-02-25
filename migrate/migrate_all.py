@@ -21,21 +21,37 @@ from sqlalchemy import text
 def get_applied_migrations(app):
     """Get list of already applied migrations from database"""
     with app.app_context():
+        # Detect database type for compatible DDL
+        db_uri = str(db.engine.url)
+        is_postgres = 'postgresql' in db_uri
+
+        # Create table if it doesn't exist (database-agnostic syntax)
+        if is_postgres:
+            create_sql = """
+                CREATE TABLE IF NOT EXISTS applied_migrations (
+                    id SERIAL PRIMARY KEY,
+                    migration_name VARCHAR(255) NOT NULL UNIQUE,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+        else:
+            create_sql = """
+                CREATE TABLE IF NOT EXISTS applied_migrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    migration_name VARCHAR(255) NOT NULL UNIQUE,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+
+        db.session.execute(text(create_sql))
+        db.session.commit()
+
         try:
             result = db.session.execute(text(
                 "SELECT migration_name FROM applied_migrations ORDER BY applied_at"
             ))
             return [row[0] for row in result.fetchall()]
         except Exception:
-            # Table doesn't exist yet, create it
-            db.session.execute(text("""
-                CREATE TABLE IF NOT EXISTS applied_migrations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    migration_name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            db.session.commit()
             return []
 
 
