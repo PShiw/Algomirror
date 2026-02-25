@@ -31,8 +31,16 @@ BASE_PATH="/var/python/algomirror"
 SQLITE_DB="$BASE_PATH/instance/algomirror.db"
 ENV_FILE="$BASE_PATH/.env"
 VENV_PYTHON="$BASE_PATH/venv/bin/python"
-VENV_PIP="$BASE_PATH/venv/bin/pip"
 FLASK_CMD="$BASE_PATH/venv/bin/flask"
+
+# Detect pip: UV-managed venvs don't have pip, use 'uv pip' instead
+if [ -f "$BASE_PATH/venv/bin/pip" ]; then
+    VENV_PIP="$BASE_PATH/venv/bin/pip"
+elif command -v uv &>/dev/null; then
+    VENV_PIP="uv pip --python $VENV_PYTHON"
+else
+    VENV_PIP="$VENV_PYTHON -m pip"
+fi
 
 # ============================================
 # ROOT CHECK
@@ -120,6 +128,13 @@ if [ "$DRIVER_INSTALLED" = false ]; then
             exit 1
         fi
     fi
+fi
+
+# Verify driver is importable
+$VENV_PYTHON -c "import psycopg" 2>/dev/null || $VENV_PYTHON -c "import psycopg2" 2>/dev/null
+if [ $? -ne 0 ]; then
+    log_message "PostgreSQL driver installed but not importable. Check errors." "$RED"
+    exit 1
 fi
 log_message "psycopg2-binary is installed" "$GREEN"
 
