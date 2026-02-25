@@ -27,15 +27,24 @@ class Config:
     SQLALCHEMY_DATABASE_URI = get_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # SQLite-specific settings for handling locks
-    # WAL mode is set via engine event listener in app/__init__.py
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'connect_args': {
-            'timeout': 30  # 30 seconds lock wait for concurrent background services
-        },
-        'pool_pre_ping': True,  # Verify connections before using
-        'pool_recycle': 3600,   # Recycle connections every hour
-    }
+    # Database engine options - conditional based on backend
+    _db_uri = get_database_uri()
+    if _db_uri.startswith('sqlite'):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'connect_args': {
+                'timeout': 30  # 30 seconds lock wait for concurrent background services
+            },
+            'pool_pre_ping': True,
+            'pool_recycle': 3600,
+        }
+    else:
+        # PostgreSQL or other databases
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'pool_pre_ping': True,
+            'pool_recycle': 3600,
+            'pool_size': 10,
+            'max_overflow': 20,
+        }
     
     # Session configuration
     SESSION_TYPE = os.environ.get('SESSION_TYPE') or 'filesystem'
