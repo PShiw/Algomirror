@@ -422,6 +422,7 @@ MIGRATE_SCRIPT
 
 # Run the migration script with proper environment
 log_message "Running migration..." "$BLUE"
+cd "$BASE_PATH"
 ALGOMIRROR_PG_URL="$PG_URL" \
 ALGOMIRROR_SQLITE_DB="$SQLITE_DB" \
 $VENV_PYTHON /tmp/algomirror_migrate.py
