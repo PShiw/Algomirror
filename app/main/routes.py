@@ -4,7 +4,7 @@ from app.main import main_bp
 from app.models import TradingAccount, ActivityLog, User
 from openalgo import api
 from datetime import datetime
-from sqlalchemy import desc
+from sqlalchemy import desc, func, case, and_, or_
 from sqlalchemy.orm import joinedload
 from app import db
 from app.utils.time_utils import format_timestamp_to_ist
@@ -46,49 +46,60 @@ def dashboard():
     if not accounts:
         return redirect(url_for('accounts.add'))
 
-    # OPTIMIZATION: Fetch ALL executions for user's strategies in ONE query
-    # This replaces 90+ individual queries with just 1
-    all_executions = []
-    if strategy_ids:
-        all_executions = StrategyExecution.query.filter(
-            StrategyExecution.strategy_id.in_(strategy_ids)
-        ).all()
-
-    # Pre-calculate P&L and position counts in Python (much faster than N queries)
-    # Group executions by strategy_id
-    executions_by_strategy = defaultdict(list)
-    for e in all_executions:
-        executions_by_strategy[e.strategy_id].append(e)
-
-    # Calculate P&L per strategy
+    # OPTIMIZATION: Use SQL aggregation instead of loading all executions into Python.
+    # Loading 1000+ ORM objects over TCP is slow with PostgreSQL (~500ms-1s).
+    # SQL aggregation returns a few rows and PostgreSQL does the heavy lifting (~5ms).
     strategy_pnl = {}
-    for strategy_id, execs in executions_by_strategy.items():
-        realized = 0.0
-        unrealized = 0.0
-        for e in execs:
-            if e.status in ['error', 'failed']:
-                continue
-            if hasattr(e, 'broker_order_status') and e.broker_order_status in ['rejected', 'cancelled']:
-                continue
-            if e.realized_pnl:
-                realized += e.realized_pnl
-            if e.status == 'entered' and e.unrealized_pnl:
-                unrealized += e.unrealized_pnl
-        strategy_pnl[strategy_id] = {
-            'realized': realized,
-            'unrealized': unrealized,
-            'total': realized + unrealized
-        }
+    today_pnl = 0
 
-    # Calculate today's P&L
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_pnl = sum(
-        e.realized_pnl or 0
-        for e in all_executions
-        if e.created_at and e.created_at >= today_start
-        and e.realized_pnl and e.status != 'failed'
-        and not (hasattr(e, 'broker_order_status') and e.broker_order_status in ['rejected', 'cancelled'])
-    )
+    if strategy_ids:
+        # Query 1: Per-strategy P&L via SQL SUM/GROUP BY (returns N rows for N strategies)
+        pnl_filter = and_(
+            StrategyExecution.status.notin_(['error', 'failed']),
+            or_(
+                StrategyExecution.broker_order_status.is_(None),
+                StrategyExecution.broker_order_status.notin_(['rejected', 'cancelled'])
+            )
+        )
+        pnl_rows = db.session.query(
+            StrategyExecution.strategy_id,
+            func.coalesce(func.sum(case(
+                (pnl_filter, StrategyExecution.realized_pnl),
+                else_=None
+            )), 0).label('realized'),
+            func.coalesce(func.sum(case(
+                (and_(pnl_filter, StrategyExecution.status == 'entered'),
+                 StrategyExecution.unrealized_pnl),
+                else_=None
+            )), 0).label('unrealized')
+        ).filter(
+            StrategyExecution.strategy_id.in_(strategy_ids)
+        ).group_by(StrategyExecution.strategy_id).all()
+
+        for row in pnl_rows:
+            realized = float(row.realized or 0)
+            unrealized = float(row.unrealized or 0)
+            strategy_pnl[row.strategy_id] = {
+                'realized': realized,
+                'unrealized': unrealized,
+                'total': realized + unrealized
+            }
+
+        # Query 2: Today's realized P&L via SQL SUM (returns 1 scalar)
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_pnl_result = db.session.query(
+            func.coalesce(func.sum(StrategyExecution.realized_pnl), 0)
+        ).filter(
+            StrategyExecution.strategy_id.in_(strategy_ids),
+            StrategyExecution.created_at >= today_start,
+            StrategyExecution.realized_pnl.isnot(None),
+            StrategyExecution.status != 'failed',
+            or_(
+                StrategyExecution.broker_order_status.is_(None),
+                StrategyExecution.broker_order_status.notin_(['rejected', 'cancelled'])
+            )
+        ).scalar()
+        today_pnl = float(today_pnl_result or 0)
 
     # Get active strategy count
     active_strategies = [s for s in strategies if s.is_active]
@@ -128,11 +139,22 @@ def dashboard():
             'connection_status': account.connection_status
         })
 
-    # Pre-calculate open positions by (strategy_id, account_id) - avoids N*M queries
+    # Query 3: Open position counts via SQL GROUP BY (returns few rows, not 1000+)
     open_positions_map = defaultdict(int)
-    for e in all_executions:
-        if e.status == 'entered':
-            open_positions_map[(e.strategy_id, e.account_id)] += 1
+    if strategy_ids:
+        open_pos_rows = db.session.query(
+            StrategyExecution.strategy_id,
+            StrategyExecution.account_id,
+            func.count(StrategyExecution.id)
+        ).filter(
+            StrategyExecution.strategy_id.in_(strategy_ids),
+            StrategyExecution.status == 'entered'
+        ).group_by(
+            StrategyExecution.strategy_id,
+            StrategyExecution.account_id
+        ).all()
+        for row in open_pos_rows:
+            open_positions_map[(row[0], row[1])] = row[2]
 
     # Create mapping of account_id -> list of active strategy names (only with open positions)
     account_strategies = {}
@@ -153,11 +175,10 @@ def dashboard():
     # Calculate overall summary statistics
     total_active_accounts = len(accounts)
 
-    # Count strategies with non-zero open positions (use pre-calculated data)
+    # Derive per-strategy open position counts from the grouped data above
     open_positions_by_strategy = defaultdict(int)
-    for e in all_executions:
-        if e.status == 'entered':
-            open_positions_by_strategy[e.strategy_id] += 1
+    for (strategy_id, account_id), count in open_positions_map.items():
+        open_positions_by_strategy[strategy_id] += count
 
     strategies_with_positions = sum(1 for s in strategies if open_positions_by_strategy.get(s.id, 0) > 0)
 
