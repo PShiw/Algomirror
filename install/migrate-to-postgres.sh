@@ -99,13 +99,21 @@ log_message "  PostgreSQL URL: ${PG_URL%%@*}@..." "$GREEN"
 # ENSURE psycopg2-binary IS INSTALLED
 # ============================================
 log_message "\nChecking psycopg2-binary..." "$BLUE"
+
+# Install system dependency for PostgreSQL client library
+apt-get install -y -qq libpq-dev >/dev/null 2>&1
+
 $VENV_PIP show psycopg2-binary >/dev/null 2>&1
 if [ $? -ne 0 ]; then
     log_message "Installing psycopg2-binary..." "$YELLOW"
-    $VENV_PIP install psycopg2-binary >/dev/null 2>&1
+    $VENV_PIP install psycopg2-binary
     if [ $? -ne 0 ]; then
-        log_message "Failed to install psycopg2-binary" "$RED"
-        exit 1
+        log_message "Trying psycopg2 (source build) as fallback..." "$YELLOW"
+        $VENV_PIP install psycopg2
+        if [ $? -ne 0 ]; then
+            log_message "Failed to install psycopg2. Check errors above." "$RED"
+            exit 1
+        fi
     fi
 fi
 log_message "psycopg2-binary is installed" "$GREEN"
