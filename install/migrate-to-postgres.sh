@@ -278,6 +278,32 @@ with app.app_context():
     db.create_all()
     print("[INFO] Tables created")
 
+    # Clean up any data from previous failed migration attempts
+    for tname in reversed(TABLE_ORDER):
+        try:
+            count = db.session.execute(text(f"SELECT COUNT(*) FROM {tname}")).scalar()
+            if count > 0:
+                print(f"  [CLEAN] {tname}: removing {count} rows from previous attempt")
+                db.session.execute(text(f"DELETE FROM {tname}"))
+        except Exception:
+            pass
+    db.session.commit()
+
+    # ============================================
+    # DETECT BOOLEAN COLUMNS FROM POSTGRESQL SCHEMA
+    # ============================================
+    pg_inspector = inspect(db.engine)
+    BOOLEAN_COLUMNS = {}
+    for tname in TABLE_ORDER:
+        try:
+            pg_cols = pg_inspector.get_columns(tname)
+            bool_cols = [c['name'] for c in pg_cols if str(c['type']).upper() == 'BOOLEAN']
+            if bool_cols:
+                BOOLEAN_COLUMNS[tname] = bool_cols
+        except Exception:
+            pass
+    print(f"[INFO] Boolean columns detected: {sum(len(v) for v in BOOLEAN_COLUMNS.values())} across {len(BOOLEAN_COLUMNS)} tables")
+
     # ============================================
     # COPY DATA TABLE BY TABLE
     # ============================================
@@ -313,8 +339,9 @@ with app.app_context():
             table_counts[table_name] = 0
             continue
 
-        # Get JSON columns for this table
+        # Get JSON and boolean columns for this table
         json_cols = JSON_COLUMNS.get(table_name, [])
+        bool_cols = BOOLEAN_COLUMNS.get(table_name, [])
 
         # Build parameterized INSERT statement
         col_list = ', '.join([f'"{c}"' for c in columns])
@@ -331,6 +358,11 @@ with app.app_context():
 
             for row in batch:
                 row_dict = dict(zip(columns, row))
+
+                # Convert SQLite integers (0/1) to Python bools for PostgreSQL
+                for bool_col in bool_cols:
+                    if bool_col in row_dict and row_dict[bool_col] is not None:
+                        row_dict[bool_col] = bool(row_dict[bool_col])
 
                 # Convert JSON text to Python objects for PostgreSQL
                 for json_col in json_cols:
@@ -356,6 +388,7 @@ with app.app_context():
                         db.session.execute(insert_sql, row_dict)
                         inserted += 1
                     except Exception as row_error:
+                        db.session.rollback()
                         print(f"    [WARN] Skipping row in {table_name}: {row_error}")
 
         db.session.commit()
