@@ -288,8 +288,9 @@ class StrategyExecutor:
                     print(f"[MAIN SESSION] Fresh leg query: {fresh_leg}, is_executed={fresh_leg.is_executed if fresh_leg else 'N/A'}")
                     logger.debug(f"[MAIN SESSION] Fresh leg query result: {fresh_leg}, is_executed={fresh_leg.is_executed if fresh_leg else 'N/A'}")
                     if fresh_leg and not fresh_leg.is_executed:
-                        fresh_leg.is_executed = True
-                        db.session.commit()
+                        with self.lock:
+                            fresh_leg.is_executed = True
+                            db.session.commit()
                         print(f"[MAIN SESSION] Leg {leg.leg_number} marked as is_executed=True - COMMITTED")
                         logger.debug(f"[MAIN SESSION] Leg {leg.leg_number} marked as is_executed=True")
                     elif fresh_leg and fresh_leg.is_executed:
@@ -377,7 +378,8 @@ class StrategyExecutor:
             strategy.trailing_sl_peak_pnl = 0.0  # Start at 0, will be updated by risk manager
             strategy.trailing_sl_trigger_pnl = initial_stop_pnl  # Current stop = initial stop at start
 
-            db.session.commit()
+            with self.lock:
+                db.session.commit()
 
             logger.info(f"[TSL INIT] Strategy {strategy.name}: Initial Stop={initial_stop_pnl:.2f}, "
                        f"Entry Value={entry_value:.2f}, Type={trailing_type}, Value={trailing_value}")
@@ -631,12 +633,11 @@ class StrategyExecutor:
         # This thread-level attempt is kept as a backup but may fail due to session conflicts
         if successful_orders:
             try:
-                # Try to mark leg as executed in thread session (backup, main session handles this)
-                leg.is_executed = True
-                db.session.commit()
+                with self.lock:
+                    leg.is_executed = True
+                    db.session.commit()
                 logger.debug(f"Leg {leg.leg_number} marked as executed (thread session - backup)")
             except Exception as e:
-                # This is expected to fail sometimes due to session conflicts
                 # The main session commit after threads complete will handle it
                 logger.debug(f"Thread session commit for leg {leg.leg_number} failed (expected): {e}")
                 db.session.rollback()
@@ -767,33 +768,32 @@ class StrategyExecutor:
                         entry_price=initial_entry_price  # Set to limit price for LIMIT orders, None for MARKET
                     )
 
-                    # Each thread has its own scoped session - commit independently
-                    # No Python lock needed for DB ops (SQLite handles write serialization via WAL)
-                    db.session.add(execution)
-
-                    # Retry commit with exponential backoff for SQLite locks
-                    max_retries = 5
+                    # Serialize DB commits across threads using self.lock
+                    # API calls run in parallel (different OpenAlgo servers), but SQLite
+                    # only allows ONE writer at a time. Without this lock, threads that
+                    # finish their API calls simultaneously all hit db.session.commit()
+                    # at once, causing "database is locked" errors.
+                    # Lock is held ONLY during add+commit (milliseconds), not during API calls.
                     committed = False
+                    max_retries = 3
                     for attempt in range(max_retries):
                         try:
-                            db.session.commit()
+                            with self.lock:
+                                db.session.add(execution)
+                                db.session.commit()
                             committed = True
                             print(f"[DB COMMIT] Leg {leg.leg_number}, account={account_name}: execution saved (id={execution.id})", flush=True)
                             break
                         except Exception as commit_error:
+                            db.session.rollback()
                             if attempt < max_retries - 1:
                                 import time as time_sleep
-                                db.session.rollback()
-                                # Re-add execution after rollback (rollback expels it from session)
-                                db.session.add(execution)
-                                wait_time = 0.2 * (2 ** attempt)  # 0.2, 0.4, 0.8, 1.6, 3.2 seconds
-                                print(f"[DB RETRY] Leg {leg.leg_number}, account={account_name}: DB locked, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s", flush=True)
+                                wait_time = 0.5 * (attempt + 1)
+                                print(f"[DB RETRY] Leg {leg.leg_number}, account={account_name}: commit error, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s - {commit_error}", flush=True)
                                 time_sleep.sleep(wait_time)
                             else:
                                 logger.error(f"Failed to commit after {max_retries} attempts: {commit_error}")
                                 print(f"[DB FAILED] Leg {leg.leg_number}, account={account_name}: commit failed after {max_retries} retries: {commit_error}", flush=True)
-                                db.session.rollback()
-                                raise
 
                     # PHASE 2: Add order to background poller for status tracking
                     if committed and execution.id is not None:
@@ -843,9 +843,10 @@ class StrategyExecutor:
                             error_message=error_msg[:500]  # Store error (truncate if too long)
                         )
 
-                        db.session.add(failed_execution)
                         try:
-                            db.session.commit()
+                            with self.lock:
+                                db.session.add(failed_execution)
+                                db.session.commit()
                         except Exception as commit_error:
                             logger.warning(f"Could not commit failed execution record: {commit_error}")
                             db.session.rollback()
