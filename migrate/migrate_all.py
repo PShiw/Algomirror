@@ -50,9 +50,36 @@ def get_applied_migrations(app):
             result = db.session.execute(text(
                 "SELECT migration_name FROM applied_migrations ORDER BY applied_at"
             ))
-            return [row[0] for row in result.fetchall()]
+            applied = [row[0] for row in result.fetchall()]
         except Exception:
-            return []
+            applied = []
+
+        # On PostgreSQL with empty tracking table, seed all SQLite-era migrations
+        # as already applied (they ran on SQLite before the PostgreSQL migration)
+        if is_postgres and not applied:
+            sqlite_migrations = [
+                '001_add_next_month_lot_size',
+                '002_add_product_to_strategy_executions',
+                '003_add_trailing_sl_tracking',
+                '004_add_supertrend_exit_reason',
+                '005_add_risk_exit_reasons',
+                '006_add_trailing_sl_initial_stop',
+                '007_add_margin_source_to_trade_qualities',
+                '008_add_option_buying_premium',
+                '009_add_performance_indexes',
+                '010_add_2026_holidays',
+                '011_update_nifty_banknifty_lot_sizes',
+            ]
+            for mig in sqlite_migrations:
+                db.session.execute(
+                    text("INSERT INTO applied_migrations (migration_name) VALUES (:name) ON CONFLICT DO NOTHING"),
+                    {"name": mig}
+                )
+            db.session.commit()
+            print(f"Seeded {len(sqlite_migrations)} pre-existing migrations (SQLite era)")
+            applied = sqlite_migrations
+
+        return applied
 
 
 def mark_migration_applied(app, migration_name):
