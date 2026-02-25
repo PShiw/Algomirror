@@ -1702,16 +1702,6 @@ def close_all_positions(strategy_id):
             - Marks status as exit_pending BEFORE placing order
             - Validates position state before processing
             """
-            import time
-
-            # Add staggered delay based on thread index to prevent OpenAlgo race condition
-            # Each thread waits: index * 300ms (0ms, 300ms, 600ms, 900ms, ...)
-            # This GUARANTEES threads never hit OpenAlgo at the same time
-            delay = thread_index * 0.3
-            if delay > 0:
-                time.sleep(delay)
-                logger.debug(f"[THREAD {thread_index}] Waited {delay:.2f}s to prevent race condition")
-
             # Store position ID - we'll re-fetch with lock inside app context
             position_id = position.id
 
@@ -1822,19 +1812,20 @@ def close_all_positions(strategy_id):
 
                     logger.debug(f"[THREAD] Close order response for {pos_symbol}: {response}")
 
-                    # Re-fetch position with lock to update order ID
-                    position_to_update = StrategyExecution.query.with_for_update(nowait=False).get(position_id)
+                    # Re-fetch position to update (no lock needed, each thread owns its row)
+                    position_to_update = StrategyExecution.query.get(position_id)
 
                     if response and response.get('status') == 'success':
                         # Get exit order ID from response
                         exit_order_id = response.get('orderid')
 
                         if position_to_update:
-                            # Update with the actual order ID (status already set to exit_pending)
+                            # Update with the actual order ID and mark as EXITED immediately
                             position_to_update.exit_order_id = exit_order_id
-                            position_to_update.broker_order_status = 'open'  # Will be updated by poller
+                            position_to_update.status = 'exited'  # Mark exited immediately, poller updates fill price
+                            position_to_update.broker_order_status = 'complete'
 
-                            # Set preliminary exit price from LTP (will be updated by poller with actual fill price)
+                            # Set preliminary exit price from LTP (poller will update with actual fill price)
                             try:
                                 quote = client.quotes(symbol=pos_symbol, exchange=pos_exchange)
                                 position_to_update.exit_price = float(quote.get('data', {}).get('ltp', 0))
@@ -1842,7 +1833,7 @@ def close_all_positions(strategy_id):
                                 logger.warning(f"[THREAD] Failed to fetch exit price for {pos_symbol}: {quote_error}")
                                 position_to_update.exit_price = pos_entry_price  # Fallback to entry price
 
-                            # Calculate preliminary realized P&L (will be updated by poller with actual fill price)
+                            # Calculate preliminary realized P&L (poller will update with actual fill price)
                             if leg_action == 'BUY':
                                 position_to_update.realized_pnl = (position_to_update.exit_price - pos_entry_price) * pos_quantity
                             else:
@@ -2159,16 +2150,17 @@ def close_individual_position(strategy_id):
 
         logger.debug(f"Close position response for {symbol}: {response}")
 
-        # Re-fetch position with lock to update order ID
-        position = StrategyExecution.query.with_for_update(nowait=False).get(position_id)
+        # Re-fetch position to update
+        position = StrategyExecution.query.get(position_id)
 
         if response and response.get('status') == 'success':
             # Get exit order ID from response
             exit_order_id = response.get('orderid')
 
-            # Update with the actual order ID
+            # Update with the actual order ID and mark as exited immediately
             position.exit_order_id = exit_order_id
-            position.broker_order_status = 'open'  # Will be updated by poller
+            position.status = 'exited'
+            position.broker_order_status = 'complete'
 
             # Set preliminary exit price from LTP (will be updated by poller with actual fill price)
             try:
@@ -2303,12 +2295,6 @@ def close_leg_all_accounts(strategy_id):
 
             # Store position ID for reloading in this thread's session
             position_id = position.id
-
-            # Add staggered delay to prevent race condition
-            delay = thread_index * 0.3
-            if delay > 0:
-                time.sleep(delay)
-                logger.debug(f"[THREAD {thread_index}] Waited {delay:.2f}s to prevent race condition")
 
             with app.app_context():
                 try:
@@ -2450,17 +2436,18 @@ def close_leg_all_accounts(strategy_id):
 
                     logger.debug(f"[THREAD] Close leg order response for {pos_symbol}: {response}")
 
-                    # Re-fetch position with lock to update order ID
-                    position_to_update = StrategyExecution.query.with_for_update(nowait=False).get(position_id)
+                    # Re-fetch position to update
+                    position_to_update = StrategyExecution.query.get(position_id)
 
                     if response and response.get('status') == 'success':
                         # Get exit order ID from response
                         exit_order_id = response.get('orderid')
 
                         if position_to_update:
-                            # Update with the actual order ID (status already set to exit_pending)
+                            # Update with exit order ID and mark as exited immediately
                             position_to_update.exit_order_id = exit_order_id
-                            position_to_update.broker_order_status = 'open'
+                            position_to_update.status = 'exited'
+                            position_to_update.broker_order_status = 'complete'
                             db.session.commit()
 
                             # Add exit order to poller to get actual fill price (same as entry orders)
