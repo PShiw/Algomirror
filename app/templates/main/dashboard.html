@@ -586,7 +586,9 @@ async function loadAccountFunds() {
                 // --- Funds section ---
                 const available = parseFloat(funds.availablecash) || 0;
                 const collateral = parseFloat(funds.collateral) || 0;
-                const cash = available - collateral;
+                const margin = parseFloat(funds.utiliseddebits || funds.used_margin) || 0;
+                // Margin eats from collateral first, then cash
+                const cash = available - Math.max(0, collateral - margin);
 
                 const availableEl = document.getElementById(`available-${account.id}`);
                 if (availableEl) {
@@ -595,7 +597,6 @@ async function loadAccountFunds() {
 
                 const marginEl = document.getElementById(`margin-${account.id}`);
                 if (marginEl) {
-                    const margin = parseFloat(funds.utiliseddebits || funds.used_margin) || 0;
                     marginEl.textContent = `₹${formatInLakhs(margin)}`;
                 }
 

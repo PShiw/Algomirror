@@ -74,7 +74,9 @@
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m py_compile \"D:\\\\AI Bootcamp 2025\\\\Session31\\\\algomirror\\\\app\\\\strategy\\\\routes.py\")",
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m py_compile \"D:\\\\AI Bootcamp 2025\\\\Session31\\\\algomirror\\\\app\\\\models.py\")",
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m py_compile \"D:\\\\openalgo-multi\\\\algomirror\\\\app\\\\utils\\\\supertrend.py\")",
-      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m py_compile \"D:\\\\openalgo-multi\\\\algomirror\\\\app\\\\tradingview\\\\routes.py\")"
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m py_compile \"D:\\\\openalgo-multi\\\\algomirror\\\\app\\\\tradingview\\\\routes.py\")",
+      "Bash(head:*)",
+      "Bash(pip show openalgo 2>/dev/null || python -c \"import openalgo; print\\(openalgo.__file__\\)\" 2>/dev/null)"
     ],
     "deny": [],
     "ask": []
