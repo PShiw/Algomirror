@@ -809,11 +809,12 @@ class MarginTracker(db.Model):
 
     def update_margins(self, funds_data):
         """Update margins from funds API response"""
-        # OpenAlgo returns 'availablecash' not 'totalcash'
+        # OpenAlgo returns 'availablecash' which is already net of used margin
         self.total_available_margin = funds_data.get('availablecash', 0)
-        # OpenAlgo returns 'utiliseddebits' not 'margins'
+        # OpenAlgo returns 'utiliseddebits' for margin currently in use
         self.used_margin = funds_data.get('utiliseddebits', 0)
-        self.free_margin = self.total_available_margin - self.used_margin
+        # availablecash is already the free margin (broker has deducted utiliseddebits)
+        self.free_margin = self.total_available_margin
         self.span_margin = funds_data.get('spanmargin', 0)
         self.exposure_margin = funds_data.get('exposuremargin', 0)
         self.option_premium = funds_data.get('optionpremium', 0)

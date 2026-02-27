@@ -441,9 +441,9 @@ def refresh_tracker(account_id):
             return jsonify({
                 'status': 'success',
                 'data': {
-                    'total_margin': float(funds_data.get('availablecash', 0)) + float(funds_data.get('collateral', 0)),
+                    'total_margin': float(funds_data.get('availablecash', 0)) + float(funds_data.get('utiliseddebits', 0)),
                     'used_margin': float(funds_data.get('utiliseddebits', 0)),
-                    'free_margin': float(funds_data.get('availablecash', 0)) + float(funds_data.get('collateral', 0)) - float(funds_data.get('utiliseddebits', 0)),
+                    'free_margin': float(funds_data.get('availablecash', 0)),
                     'available_cash': float(funds_data.get('availablecash', 0)),
                     'collateral': float(funds_data.get('collateral', 0)),
                     'utilized_debits': float(funds_data.get('utiliseddebits', 0)),

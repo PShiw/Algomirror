@@ -433,9 +433,9 @@ class MarginCalculator:
                 # Fallback to cached data if available
                 if account.last_funds_data:
                     available_cash = float(account.last_funds_data.get('availablecash', 0))
-                    used_margin = float(account.last_funds_data.get('utiliseddebits', 0))
-                    fallback_margin = available_cash - used_margin
-                    logger.debug(f"[MARGIN DEBUG] Using fallback margin from last_funds_data: ₹{fallback_margin:,.2f} (availablecash={available_cash:,.2f} - utiliseddebits={used_margin:,.2f})")
+                    # availablecash is already net of used margin from broker
+                    fallback_margin = available_cash
+                    logger.debug(f"[MARGIN DEBUG] Using fallback margin from last_funds_data: ₹{fallback_margin:,.2f} (availablecash={available_cash:,.2f})")
                     return fallback_margin
                 # Fallback to existing tracker if available
                 if tracker and tracker.free_margin is not None:
@@ -449,8 +449,8 @@ class MarginCalculator:
             # Try fallback to cached data on exception
             if account.last_funds_data:
                 available_cash = float(account.last_funds_data.get('availablecash', 0))
-                used_margin = float(account.last_funds_data.get('utiliseddebits', 0))
-                fallback_margin = available_cash - used_margin
+                # availablecash is already net of used margin from broker
+                fallback_margin = available_cash
                 logger.debug(f"[MARGIN DEBUG] Exception fallback margin: ₹{fallback_margin:,.2f}")
                 return fallback_margin
             return 0
