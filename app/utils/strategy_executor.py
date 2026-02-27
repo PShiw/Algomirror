@@ -789,7 +789,10 @@ class StrategyExecutor:
                 elif leg.order_type == 'LIMIT':
                     order_params['price_type'] = 'LIMIT'
                     if leg.limit_price and float(leg.limit_price) > 0:
-                        order_params['price'] = leg.limit_price
+                        # Send price as string to match OpenAlgo API format
+                        order_params['price'] = str(leg.limit_price)
+                        order_params['trigger_price'] = "0"
+                        order_params['disclosed_quantity'] = "0"
                     else:
                         error_msg = f"LIMIT order requires a valid price but limit_price is {leg.limit_price}"
                         logger.error(f"[ORDER ERROR] Leg {leg.leg_number}, account={account_name}: {error_msg}")

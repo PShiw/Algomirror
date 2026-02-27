@@ -539,12 +539,24 @@ def cancel_leg_orders(strategy_id, leg_id):
         strategy = Strategy.query.filter_by(
             id=strategy_id,
             user_id=current_user.id
-        ).first_or_404()
+        ).first()
+
+        if not strategy:
+            return jsonify({
+                'status': 'error',
+                'message': f'Strategy not found (id={strategy_id})'
+            }), 404
 
         leg = StrategyLeg.query.filter_by(
             id=leg_id,
             strategy_id=strategy_id
-        ).first_or_404()
+        ).first()
+
+        if not leg:
+            return jsonify({
+                'status': 'error',
+                'message': f'Leg not found (id={leg_id}) for strategy {strategy.name}'
+            }), 404
 
         # Get all executions for this leg with status 'pending' (open orders)
         pending_executions = StrategyExecution.query.filter_by(
@@ -686,12 +698,24 @@ def modify_leg_orders(strategy_id, leg_id):
         strategy = Strategy.query.filter_by(
             id=strategy_id,
             user_id=current_user.id
-        ).first_or_404()
+        ).first()
+
+        if not strategy:
+            return jsonify({
+                'status': 'error',
+                'message': f'Strategy not found (id={strategy_id})'
+            }), 404
 
         leg = StrategyLeg.query.filter_by(
             id=leg_id,
             strategy_id=strategy_id
-        ).first_or_404()
+        ).first()
+
+        if not leg:
+            return jsonify({
+                'status': 'error',
+                'message': f'Leg not found (id={leg_id}) for strategy {strategy.name}'
+            }), 404
 
         # Get all executions for this leg with status 'pending' (open orders)
         pending_executions = StrategyExecution.query.filter_by(
@@ -806,12 +830,24 @@ def convert_leg_to_market(strategy_id, leg_id):
         strategy = Strategy.query.filter_by(
             id=strategy_id,
             user_id=current_user.id
-        ).first_or_404()
+        ).first()
+
+        if not strategy:
+            return jsonify({
+                'status': 'error',
+                'message': f'Strategy not found (id={strategy_id})'
+            }), 404
 
         leg = StrategyLeg.query.filter_by(
             id=leg_id,
             strategy_id=strategy_id
-        ).first_or_404()
+        ).first()
+
+        if not leg:
+            return jsonify({
+                'status': 'error',
+                'message': f'Leg not found (id={leg_id}) for strategy {strategy.name}'
+            }), 404
 
         # Get all executions for this leg with status 'pending' (open orders)
         pending_executions = StrategyExecution.query.filter_by(

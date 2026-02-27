@@ -121,9 +121,11 @@ def place_order_with_freeze_check(client, user_id: int, **order_params) -> Dict:
         # Add price/trigger_price based on order type
         price_type = order_params.get('price_type', 'MARKET')
 
-        # For LIMIT orders: price is required
+        # For LIMIT orders: price, trigger_price, disclosed_quantity are required
         if price_type == 'LIMIT':
-            splitorder_params['price'] = order_params.get('price', 0)
+            splitorder_params['price'] = str(order_params.get('price', 0))
+            splitorder_params['trigger_price'] = str(order_params.get('trigger_price', '0'))
+            splitorder_params['disclosed_quantity'] = str(order_params.get('disclosed_quantity', '0'))
 
         # For SL/SL-M orders: both price and trigger_price may be needed
         elif price_type in ['SL', 'SL-M']:
