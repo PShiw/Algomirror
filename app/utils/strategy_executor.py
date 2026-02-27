@@ -677,7 +677,7 @@ class StrategyExecutor:
                     status='pending',
                     broker_order_status='open',
                     entry_time=result.get('entry_time', datetime.utcnow()),
-                    entry_price=None
+                    entry_price=leg.limit_price if leg.order_type == 'LIMIT' and leg.limit_price else None
                 )
                 db.session.add(execution)
                 records_to_commit.append(execution)
