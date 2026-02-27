@@ -1839,6 +1839,24 @@ function saveStrategy(execute = false) {
         }
     }
 
+    // Validate limit price for all non-executed legs
+    const missingPriceLegs = [];
+    document.querySelectorAll('.leg-item').forEach((legItem, index) => {
+        if (legItem.dataset.isExecuted === 'true' || legItem.dataset.isPending === 'true') return;
+        const orderType = legItem.querySelector('.leg-order-type').value;
+        if (orderType === 'LIMIT') {
+            const lp = parseFloat(legItem.querySelector('.leg-limit-price')?.value);
+            if (!lp || lp <= 0) {
+                const legNumber = legItem.querySelector('.leg-number').textContent;
+                missingPriceLegs.push(`Leg ${legNumber}`);
+            }
+        }
+    });
+    if (missingPriceLegs.length > 0) {
+        showNotification(`Limit price is required for: ${missingPriceLegs.join(', ')}`, 'error');
+        return;
+    }
+
     const legs = [];
     document.querySelectorAll('.leg-item').forEach((legItem, index) => {
         // Skip executed or pending legs - backend preserves them automatically

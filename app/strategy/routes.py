@@ -243,6 +243,15 @@ def builder(strategy_id=None):
                             'message': f'Safety limit exceeded: Maximum {MAX_LOTS} lots allowed per leg in Fixed Lot Size mode. Leg {leg_number} has {lots} lots.'
                         }), 400
 
+                # Validate limit price for LIMIT orders
+                order_type = leg_data.get('order_type', 'MARKET')
+                limit_price = leg_data.get('limit_price')
+                if order_type == 'LIMIT' and (not limit_price or float(limit_price) <= 0):
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'Limit price is required for Leg {leg_number}. Please set a valid price greater than 0.'
+                    }), 400
+
                 # Log the received data for debugging
                 logger.debug(f"Saving leg {leg_number}: instrument={leg_data.get('instrument')}, "
                            f"lots={lots}, quantity={leg_data.get('quantity')}")
