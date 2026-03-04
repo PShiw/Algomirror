@@ -213,6 +213,7 @@ class SupertrendExitService:
         Determine if this is a candle close time for the strategy's timeframe.
         Called at :00 seconds of each minute via cron trigger.
 
+        For 1m: checks every minute
         For 3m: checks at :00, :03, :06, :09, :12, :15, :18, :21, :24, :27, :30, etc.
         For 5m: checks at :00, :05, :10, :15, :20, :25, :30, :35, :40, :45, :50, :55
         For 10m: checks at :00, :10, :20, :30, :40, :50
@@ -223,6 +224,7 @@ class SupertrendExitService:
 
         # Map timeframe to minutes
         timeframe_minutes = {
+            '1m': 1,
             '3m': 3,
             '5m': 5,
             '10m': 10,
